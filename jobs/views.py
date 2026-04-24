@@ -372,6 +372,7 @@ def run_ai_fix_loop(prompt: str, max_attempts: int = 3) -> dict:
         attempts.append(attempt_result)
 
         if ai_result.startswith("[error]"):
+            attempt_result["test"] = None
             break
 
         test_result = run_tests()
@@ -379,7 +380,7 @@ def run_ai_fix_loop(prompt: str, max_attempts: int = 3) -> dict:
         if test_result.get("success"):
             return {"success": True, "attempts": attempts}
 
-        optional_contexts.append(
+        optional_contexts = [
             "\n".join(
                 [
                     "Previous attempt failed.",
@@ -394,7 +395,7 @@ def run_ai_fix_loop(prompt: str, max_attempts: int = 3) -> dict:
                     "Fix the failure while preserving the original user request.",
                 ]
             )
-        )
+        ]
 
     return {"success": False, "attempts": attempts}
 
