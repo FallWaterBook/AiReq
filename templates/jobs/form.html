@@ -17,6 +17,7 @@
       --action: #2f363f;
       --action-hover: #232a32;
       --danger: #8e2d3b;
+      --danger-hover: #7a2430;
       --radius: 14px;
       --radius-sm: 10px;
       --shadow: 0 14px 36px rgba(38, 43, 51, 0.14);
@@ -39,77 +40,71 @@
         linear-gradient(145deg, var(--bg-0) 0%, var(--bg-1) 52%, #d9dde2 100%);
     }
 
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
     h1,
     h2,
     h3 {
-      margin: 0;
+      margin: 0 0 10px;
       letter-spacing: 0.02em;
       line-height: 1.35;
       color: #1f252d;
     }
 
     h1 {
-      max-width: 920px;
-      margin: 0 auto 20px;
       font-size: clamp(1.7rem, 2.4vw, 2.15rem);
       font-weight: 700;
+      margin-bottom: 2px;
     }
 
     h2 {
-      margin-bottom: 12px;
       font-size: clamp(1.1rem, 1.55vw, 1.3rem);
       font-weight: 650;
     }
 
     h3 {
-      margin: 6px 0 10px;
       font-size: 1rem;
       font-weight: 620;
       color: var(--text-soft);
     }
 
-    form,
-    pre,
-    p,
-    label,
-    button,
-    input,
-    textarea,
-    hr,
-    h2,
-    h3 {
-      max-width: 920px;
-      margin-left: auto;
-      margin-right: auto;
-      display: block;
-    }
-
-    form,
-    pre[id="job-action-result"],
-    pre:not([id]),
-    p {
-      width: 100%;
-    }
-
-    form,
-    pre,
-    p {
+    .section {
       background: linear-gradient(160deg, var(--surface) 0%, #eef1f4 100%);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: 16px;
-      margin-bottom: 14px;
+      padding: 18px;
       animation: appear 320ms ease-out both;
     }
 
-    p {
-      margin-top: 0;
+    .section-note {
+      margin: 0 0 10px;
+      color: var(--text-soft);
+      font-size: 0.93rem;
+    }
+
+    form,
+    .field,
+    .actions,
+    .result-block {
+      display: block;
+      width: 100%;
+    }
+
+    .field + .field,
+    .field + .actions,
+    .actions + .actions {
+      margin-top: 12px;
     }
 
     label {
-      margin-top: 12px;
-      margin-bottom: 6px;
+      display: block;
+      margin: 0 0 6px;
       font-size: 0.94rem;
       font-weight: 620;
       color: var(--text-soft);
@@ -140,13 +135,17 @@
       background: #fcfdff;
     }
 
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
     button {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: fit-content;
-      margin-left: auto;
-      margin-right: auto;
+      width: 100%;
       min-height: 42px;
       padding: 10px 16px;
       border: 0;
@@ -158,7 +157,6 @@
       cursor: pointer;
       transition: transform 100ms ease, box-shadow 140ms ease, background 140ms ease;
       box-shadow: 0 8px 16px rgba(35, 40, 47, 0.24);
-      margin-bottom: 10px;
     }
 
     button:hover {
@@ -168,6 +166,16 @@
 
     button:active {
       transform: translateY(1px);
+    }
+
+    .danger-button {
+      background: linear-gradient(180deg, #a93b4b 0%, var(--danger) 100%);
+      box-shadow: 0 8px 16px rgba(108, 29, 42, 0.24);
+    }
+
+    .danger-button:hover {
+      background: linear-gradient(180deg, #952f3e 0%, var(--danger-hover) 100%);
+      box-shadow: 0 10px 18px rgba(94, 24, 36, 0.3);
     }
 
     a {
@@ -181,25 +189,43 @@
       color: #1f2b38;
     }
 
+    .result-meta {
+      margin: 0;
+      font-size: 0.95rem;
+      color: var(--text-soft);
+    }
+
+    .result-meta strong {
+      color: var(--text);
+    }
+
+    .hint {
+      margin: 0 0 10px;
+      font-size: 0.9rem;
+      color: #5e6773;
+    }
+
     pre {
       white-space: pre-wrap;
       word-break: break-word;
+      overflow-wrap: anywhere;
       font-family: "IBM Plex Mono", "Consolas", "Menlo", monospace;
       font-size: 0.9rem;
       line-height: 1.55;
       background: linear-gradient(170deg, #eaedf1 0%, #e2e6eb 100%);
       overflow: auto;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      max-height: 320px;
     }
 
-    hr {
-      border: 0;
-      height: 1px;
-      margin: 20px auto;
-      background: linear-gradient(90deg, transparent 0%, #9098a580 18%, #9098a580 82%, transparent 100%);
-    }
-
-    p[style*="#b00020"] {
-      border-color: #c3818c;
+    .error-box {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid #c3818c;
+      border-radius: var(--radius-sm);
       background: linear-gradient(170deg, #f3e7e9 0%, #efd8dc 100%);
       color: var(--danger);
       font-weight: 600;
@@ -221,79 +247,115 @@
         padding: 18px 12px 30px;
       }
 
-      form,
-      pre,
-      p {
+      .container {
+        gap: 14px;
+      }
+
+      .section {
         padding: 13px;
         border-radius: 12px;
       }
 
       button {
-        width: 100%;
-        min-height: 44px;
+        min-height: 46px;
       }
     }
   </style>
 </head>
 <body>
-  <h1>AiReq</h1>
+  <div class="container">
+    <h1>AiReq</h1>
 
-  <h2>AI Job</h2>
-  <form method="post" action="/jobs">
-    {% csrf_token %}
-    <label for="prompt">Prompt</label><br>
-    <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea><br><br>
-    <button type="submit">送信</button>
-  </form>
-
-  {% if result is not None %}
-    <hr>
-    <h2>実行結果</h2>
     {% if job %}
-      <p>Job ID: {{ job.id }}</p>
-      <p>Status: {{ job.status }}</p>
-      <p>Detail API: <a href="/jobs/{{ job.id }}">/jobs/{{ job.id }}</a></p>
+      <p class="result-meta">最新Job: <strong>{{ job.id }}</strong> / Status: <strong>{{ job.status }}</strong> / Detail API: <a href="/jobs/{{ job.id }}">/jobs/{{ job.id }}</a></p>
     {% endif %}
-    <p>{{ result }}</p>
-  {% endif %}
 
-  <hr>
-  <h2>Test / Commit / Push</h2>
-  <label for="job-id">Job ID</label><br>
-  <input id="job-id" type="number" value="{% if job %}{{ job.id }}{% endif %}" placeholder="job id"><br><br>
+    <section class="section">
+      <h2>1. Prompt送信</h2>
+      <p class="section-note">まずAI修正を開始します。</p>
+      <form method="post" action="/jobs">
+        {% csrf_token %}
+        <div class="field">
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea>
+        </div>
+        <div class="actions">
+          <button type="submit">AI修正を実行</button>
+        </div>
+      </form>
+    </section>
 
-  <button type="button" onclick="runTest()">test 実行</button>
-  <button type="button" onclick="runAutoFix()">AI修正 + テスト自動ループ</button><br><br>
+    <section class="section">
+      <h2>2. AI修正 + テスト自動ループ</h2>
+      <p class="section-note">最新Job IDを使って、修正とテストを実行します。</p>
+      <div class="field">
+        <label for="job-id">Job ID</label>
+        <p class="hint">現在の操作対象: Job {{ job.id }}</p>
+        <input id="job-id" type="number" value="{{ job.id }}" readonly>
+      </div>
+      <div class="actions">
+        <button type="button" onclick="runAutoFix()">AI修正→テスト自動ループ</button>
+      </div>
+      <div class="actions">
+        <button type="button" onclick="runTest()">テストのみ実行</button>
+      </div>
+      <h3>操作ログ（履歴）</h3>
+      <pre id="job-action-result"></pre>
+    </section>
 
-  <label for="commit-message">Commit Message</label><br>
-  <input id="commit-message" type="text" size="60" placeholder="commit message"><br><br>
-  <button type="button" onclick="runCommit()">commit</button>
-  <button type="button" onclick="runPush()">push</button>
+    <section class="section">
+      <h2>3. Git Diff確認</h2>
+      <p class="section-note">Commit/Push 前に差分を確認してください。</p>
+      <form method="post" action="/git-diff">
+        {% csrf_token %}
+        <div class="field">
+          <label for="directory">Directory</label>
+          <input id="directory" name="directory" type="text" value="{{ git_directory }}" size="60" placeholder="例: . または /path/to/repo">
+        </div>
+        <div class="actions">
+          <button type="submit">Git Diff確認</button>
+        </div>
+      </form>
+      {% if git_error %}
+        <p class="error-box">Error: {{ git_error }}</p>
+      {% endif %}
+      {% if git_diff is not None %}
+        <h3>Diff Result</h3>
+        {% if git_diff %}
+          <pre>{{ git_diff }}</pre>
+        {% else %}
+          <p class="section-note">差分はありません。</p>
+        {% endif %}
+      {% endif %}
+    </section>
 
-  <h3>操作結果</h3>
-  <pre id="job-action-result" style="white-space: pre-wrap; word-break: break-word;"></pre>
+    <section class="section">
+      <h2>4. Commit</h2>
+      <p class="hint">差分確認後に Commit してください。</p>
+      <div class="field">
+        <label for="commit-message">Commit Message</label>
+        <input id="commit-message" type="text" size="60" placeholder="Commitメッセージを入力">
+      </div>
+      <div class="actions">
+        <button type="button" onclick="runCommit()">Commit</button>
+      </div>
+    </section>
 
-  <hr>
-  <h2>Git Diff</h2>
-  <form method="post" action="/git-diff">
-    {% csrf_token %}
-    <label for="directory">Directory</label><br>
-    <input id="directory" name="directory" type="text" value="{{ git_directory }}" size="60" placeholder="例: . または /path/to/repo"><br><br>
-    <button type="submit">差分を取得</button>
-  </form>
+    <section class="section">
+      <h2>5. Push</h2>
+      <p class="hint">Push前に必ずGit Diffとテスト結果を確認してください。</p>
+      <div class="actions">
+        <button type="button" class="danger-button" onclick="runPush()">Push</button>
+      </div>
+    </section>
 
-  {% if git_error %}
-    <p style="color: #b00020;">Error: {{ git_error }}</p>
-  {% endif %}
-
-  {% if git_diff is not None %}
-    <h3>Diff Result</h3>
-    {% if git_diff %}
-      <pre style="white-space: pre-wrap; word-break: break-word;">{{ git_diff }}</pre>
-    {% else %}
-      <p>差分はありません。</p>
+    {% if result is not None %}
+      <section class="section result-block">
+        <h2>実行結果</h2>
+        <pre>{{ result }}</pre>
+      </section>
     {% endif %}
-  {% endif %}
+  </div>
 
   <script>
     async function postJobAction(action, payload) {
@@ -304,6 +366,8 @@
         return;
       }
 
+      const previousLog = out.textContent;
+      out.textContent = '実行中...';
       const body = payload ? JSON.stringify(payload) : '{}';
       try {
         const res = await fetch(`/jobs/${jobId}/${action}`, {
@@ -315,7 +379,14 @@
           body,
         });
         const data = await res.json();
-        out.textContent = JSON.stringify(data, null, 2);
+        out.textContent = `\n=== ${action.toUpperCase()} ===\n` + JSON.stringify(data, null, 2) + "\n" + previousLog;
+
+        const loopSuccess = typeof data.success === 'boolean'
+          ? data.success
+          : (data.auto_fix && typeof data.auto_fix.success === 'boolean' ? data.auto_fix.success : null);
+        if (typeof loopSuccess === 'boolean') {
+          out.textContent = (loopSuccess ? 'SUCCESS: テスト通過\n' : 'FAILED: 修正未完了\n') + out.textContent;
+        }
       } catch (e) {
         out.textContent = `request failed: ${e}`;
       }
@@ -330,11 +401,13 @@
     }
 
     function runCommit() {
+      if (!confirm("Commitしますか？")) return;
       const commitMessage = document.getElementById('commit-message').value;
       postJobAction('commit', { commit_message: commitMessage });
     }
 
     function runPush() {
+      if (!confirm("本当にPushしますか？（取り消しにくい操作です）")) return;
       postJobAction('push');
     }
   </script>
