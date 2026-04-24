@@ -45,6 +45,46 @@ def extract_unified_diff(text: str) -> str:
     return stripped
 
 
+def sanitize_ai_output(text: str) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+    fence = "`" * 3
+
+    def is_leading_explanation(line: str) -> bool:
+        stripped = line.strip().lower()
+        if not stripped:
+            return True
+        prefixes = (
+            "here is",
+            "here's",
+            "here are",
+            "below is",
+            "the updated code",
+            "updated code:",
+            "sure,",
+            "sure.",
+            "certainly,",
+            "certainly.",
+            "of course",
+        )
+        return stripped.startswith(prefixes)
+
+    while lines and is_leading_explanation(lines[0]):
+        lines.pop(0)
+
+    if lines and lines[0].strip().startswith(fence):
+        lines = lines[1:]
+
+    if lines:
+        for idx in range(len(lines) - 1, -1, -1):
+            if lines[idx].strip().startswith(fence):
+                lines = lines[:idx]
+                break
+
+    lines = [line for line in lines if not line.strip().startswith(fence)]
+    return "\n".join(lines).strip()
+
+
 def load_codex_rules() -> str:
     rules_path = Path(settings.CODEX_RULES_PATH)
     try:
@@ -142,10 +182,10 @@ def build_ai_input(
     sections = [
         "You are a senior Python engineer.",
         "Follow CODEX_RULES strictly.",
-        "Return ONLY a valid unified diff patch.",
+        "Return ONLY the full updated source code for TARGET_FILE_PATH.",
         "Do not modify unrelated code.",
         "Do not add explanations.",
-        "Ensure the patch can be applied by git apply.",
+        "Do not output diff.",
         "Do not change file structure.",
         "Do not rename functions unless required.",
         "Preserve existing behavior unless explicitly instructed.",
@@ -178,7 +218,9 @@ def run_ai_openai(ai_input: str, target_file_path: Path) -> str:
         logger.error("OPENAI_API_KEY is not set")
         return "[error] OPENAI_API_KEY is not set"
 
-    logger.info("OpenAI diff generation start: file=%s model=%s", target_file_path, model)
+    logger.info("OpenAI source generation start: file=%s model=%s", target_file_path, model)
+
+    backup_path = target_file_path.with_suffix(target_file_path.suffix + ".bak")
 
     try:
         from openai import OpenAI
@@ -188,44 +230,68 @@ def run_ai_openai(ai_input: str, target_file_path: Path) -> str:
             model=model,
             input=ai_input,
         )
-
         output_text = getattr(response, "output_text", "") or ""
-        diff_text = extract_unified_diff(output_text)
-        if not diff_text.strip():
-            logger.error("OpenAI response diff was empty for file=%s", target_file_path)
-            return "[error] OpenAI response diff was empty"
+        updated_source = sanitize_ai_output(output_text)
+        logger.info(
+            "AI output sanitized: raw_length=%s sanitized_length=%s",
+            len(output_text),
+            len(updated_source),
+        )
 
-        check_result = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "apply", "--check", "-"],
-            input=diff_text,
+        stripped_source = updated_source.strip()
+        if not stripped_source:
+            reason = "empty after sanitize"
+            logger.error("AI output safety check failed: %s", reason)
+            return "[error] OpenAI response source was empty after sanitize"
+
+        if len(stripped_source) < 10:
+            reason = f"too short after sanitize: length={len(stripped_source)}"
+            logger.error("AI output safety check failed: %s", reason)
+            return "[error] OpenAI response source is too short after sanitize"
+        try:
+            compile(updated_source, str(target_file_path), "exec")
+        except Exception as e:
+            logger.error("AI output compile check failed: %s", str(e))
+            return f"[error] invalid python code: {e}"
+
+        original_source = target_file_path.read_text(encoding="utf-8")
+        backup_path.write_text(original_source, encoding="utf-8")
+
+        target_file_path.write_text(updated_source, encoding="utf-8")
+
+        compile_result = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(target_file_path)],
             text=True,
             capture_output=True,
             check=False,
             timeout=30,
         )
-        if check_result.returncode != 0:
-            message = check_result.stderr.strip() or check_result.stdout.strip() or "git apply --check failed"
-            logger.error("git apply --check failed: %s", message)
-            return f"[error] git apply check failed: {message}"
+        if compile_result.returncode != 0:
+            target_file_path.write_text(original_source, encoding="utf-8")
+            message = (
+                compile_result.stderr.strip()
+                or compile_result.stdout.strip()
+                or "py_compile failed"
+            )
+            logger.error("py_compile failed and file restored: %s", message)
+            return f"[error] py_compile failed after overwrite: {message}"
 
-        apply_result = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "apply", "-"],
-            input=diff_text,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
-        if apply_result.returncode != 0:
-            message = apply_result.stderr.strip() or apply_result.stdout.strip() or "git apply failed"
-            logger.error("git apply failed: %s", message)
-            return f"[error] git apply failed: {message}"
-
-        logger.info("OpenAI diff applied successfully: file=%s", target_file_path)
-        return diff_text
+        logger.info("OpenAI source applied successfully: file=%s", target_file_path)
+        return updated_source
     except Exception as exc:
-        logger.exception("OpenAI diff apply flow failed for file=%s", target_file_path)
+        logger.exception("OpenAI source apply flow failed for file=%s", target_file_path)
+        if backup_path.exists():
+            try:
+                target_file_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
+            except Exception:
+                logger.exception("Failed to restore file from backup after exception")
         return f"[error] OpenAI API call failed: {exc}"
+    finally:
+        if backup_path.exists():
+            try:
+                backup_path.unlink()
+            except Exception:
+                logger.warning("Failed to remove backup file: %s", backup_path)
 
 
 def read_prompt(request: HttpRequest) -> str:

@@ -1,90 +1,96 @@
-# CODEX_RULES.md（YUITO / Codex運用ルール）
+# CODEX_RULES.md (AiReq / OpenAI API full-source-output rules)
 
-この文書は Codex（VSCode拡張）に作業を依頼するための運用ルールです。  
-上位規約は `CODING_GUIDELINES.md`（憲法）であり、矛盾する場合は必ず `CODING_GUIDELINES.md` を優先します。  
-`.codex-instructions.md` は最小要約、本書は実運用のガードレールです。
+この文書は、AiReq で OpenAI API モデルに修正依頼する際の最上位運用ルールです。  
+本ルールの目的は、対象ファイル 1 つの修正後コード全文を安全に返し、アプリ側の上書き運用を安定させることです。
 
----
+## 1. 出力契約 (最重要)
 
-## 0. 最優先（破ったら差し戻し）
-- views.py に業務ロジック禁止（HTTP I/O と service 呼び出しのみ）
-- fat model 禁止
-- 業務ロジックは services / common_service に集約
-- 共通処理を utils に逃がさない（共通化するなら views_helpers / domain_helpers / common_service）
-- 論理削除は is_deleted
-- 変更は最小（既存 API 仕様・エラーマッピング・テスト期待を壊さない）
+- 出力は **対象ファイル 1 つ分の修正後コード全文のみ**。
+- 説明文、設計意図、要約、見出し、Markdown、コードブロックは禁止。
+- 対象ファイル以外の内容を出力してはならない。
+- 差分形式 (unified diff など) の出力は禁止。
+- 出力先頭から末尾まで、ファイル内容そのものだけを返すこと。
 
-## 1. レイヤ責務（迷ったらここに戻る）
-- views: HTTP I/O、入力取得、最低限の入力型変換、service呼び出し、レスポンス生成
-- views_helpers: 入力パース/軽いバリデーション共通化、例外からHTTPレスポンス変換の集約
-- services: CRUD、状態遷移、トランザクション、業務ルール、論理削除、例外送出
-- query_service: 参照専用、DTO返却、一覧/詳細の検索条件（論理削除含む）を一元化
-- models: フィールド/制約/TextChoices/最低限の補助（業務判断は置かない）
+## 2. Single File Enforcement
 
-## 2. 例外とHTTP（統一）
-- ドメイン例外は `apps/<app>/exceptions.py` に定義し、基底例外（例: `<App>ServiceError`）を継承する
-- view は例外を握りつぶさず `map_exception_to_response()` に渡す
-- エラーレスポンス形式は常に `{"error": "message"}`
+- 出力対象は常に 1 ファイルのみとする。
+- 複数ファイル修正要求が来た場合でも、出力対象は 1 ファイルのみとする。
+- 出力対象は必ず `TARGET_FILE_PATH` に一致しなければならない。
+- `TARGET_FILE_PATH` 以外のファイル内容を出力してはならない。
 
-## 3. 日付・時刻・JSONの方針（YUITO標準）
-- datetime は ISO8601 文字列で返す（既存実装に合わせる）
-- request body は `parse_json_body()` を通す
-- 文字列必須は `require_str()`、整数必須は `require_int()`、日付は `require_date()/optional_date()` を使う
+## 3. Strict Output Sanitization
 
-## 4. テスト運用ルール
-- service 層は必ず unit test を作る（Django TestCaseでDB利用OK）
-- 1テスト1検証、テスト名から業務ルールが読めること
-- 既存テストが通る前提で、必要なら最小限の修正のみ行う
+- 出力に以下を含めることを禁止する。
+- バッククォート3連 (```)
+- 言語指定付きコードブロック記法 (` ```python ` / ` ```diff ` を含むすべてのコードブロック記法)
+- Markdown 記法として解釈される囲い文字列
+- 出力は純粋なソースコードのみとする。
 
-## 5. 依頼時テンプレ（コピペ用）
-以下を依頼文の先頭に必ず付ける：
+## 4. File Identity Rule
 
-YUITO の CODING_GUIDELINES.md と CODEX_RULES.md を必ず遵守してください。  
-views.py にロジック禁止。fat model 禁止。業務ロジックは services/common_service。  
-共通処理を utils に逃がさない。  
-既存API仕様・レスポンス形式(`{"error": "..."}`)・例外からHTTPへのマッピング・テスト期待を壊さないのが最優先。  
-出力は「設計意図→変更ファイル一覧→修正後コード→テスト要約→テストコマンド」の順で。
+- 出力内容は必ず `TARGET_FILE_PATH` の修正後内容でなければならない。
+- 別ファイルのコードを生成してはならない。
+- ファイル名コメント、パスコメント、メタ情報行を出力してはならない。
 
-## 6. 模範例（recordsを基準にする）
-- `apps/records` の責務分離（views / services / views_helpers / query_service / exceptions）を他アプリでも基準にする
-- 迷ったら records の実装と同じ方向に寄せる
+## 5. Full Output Integrity Rule
 
-## 7. 禁止事項（AIがやりがちな地雷）
-- views で ORM を直接叩かない（例: `User.objects.get` / `filter`）
-- services に寄せられる共通処理を utils に置かない
-- 既存テストを削除して通すのは禁止（修正が必要なら理由と影響範囲を書く）
-- APIレスポンスのキー名・型・ステータスコードの変更は禁止（変更するなら仕様書とtestsも必ず更新）
-- 例外のHTTPマッピング方針（404/409/400）を勝手に変えない
+- 出力は必ずファイル全体を完全に含むこと。
+- 部分的なコード出力は禁止。
+- ファイルの先頭行から末尾行まで欠損なく出力すること。
+- 出力途中で終了してはならない。
 
-## 8. Done（完了条件 / 完了チェック）
-以下をすべて満たしたら完了とする：
+## 6. Structural Completeness Rule
 
-- [ ] 変更対象の app で service unit test が追加/更新されている
-- [ ] view は HTTP I/O のみで、業務判断・ORM直叩きがない
-- [ ] 例外は `apps/<app>/exceptions.py` にあり、views_helpers でHTTPへ変換される
-- [ ] `python manage.py test apps -v 2` が通る
-- [ ] OpenAPI（`docs/api/*.yaml`）と実装が矛盾していない（必要なら更新）
+- 出力コードは構文的に完全であること。
+- 括弧、クォート、インデントが崩れていないこと。
+- 不完全な文、途中で切れた行を出力してはならない。
 
-## 9. 実行コマンド（迷ったらこれだけ）
-### 全体テスト（最優先）
-- `DJANGO_SETTINGS_MODULE=config.settings.test SECRET_KEY=dummy DEBUG=0 python manage.py test apps -v 2`
+## 7. Safe Overwrite Rule
 
-### 特定アプリ
-- `python manage.py test apps.records -v 2`
-- `python manage.py test apps.trainings -v 2`
-- `python manage.py test apps.plans -v 2`
+- 出力は既存ファイルの完全な置き換えとして使用される前提とする。
+- 不完全な出力は重大な破壊を引き起こすため、完全でない場合は出力してはならない。
 
-### マイグレーション（新規モデル追加時のみ）
-- `python manage.py makemigrations`
-- `python manage.py migrate`
+## 8. スコープ制約
 
-### OpenAPIの動作確認（任意）
-- `python manage.py runserver`
+- 変更対象は依頼で指定された `TARGET_FILE_PATH` のみ。
+- `ALLOWED_FILES` / `FORBIDDEN_FILES` の制約を厳守すること。
+- 新規ファイル追加、ファイル削除、ファイル移動、ファイル名変更は禁止（明示指示時のみ許可）。
+- ディレクトリ構造変更は禁止。
 
-### runserver の設定例
-- `DB_NAME_DEV=yuito_dev DB_USER=yuito DB_PASSWORD=CHANGE_ME_STRONG_PASSWORD DB_HOST=127.0.0.1 DB_PORT=5432 DJANGO_SETTINGS_MODULE=config.settings.dev python manage.py runserver`
+## 9. 最小変更ポリシー
 
-## 10. READMEへのリンク（任意だが推奨）
-README の Documentation に以下を追加：
+- `TARGET_SOURCE_CODE` を基準に、目的達成に必要な最小限だけ修正すること。
+- 既存コード構造は可能な限り維持すること。
+- 余計なリファクタリングは禁止。
+- import 整理・並び替えは禁止（修正に必須な場合のみ許可）。
+- コメント追加・削除・書き換えは禁止（明示指示時のみ許可）。
+- 空白・改行だけの変更は禁止。
 
-- Codex運用ルール
+## 10. 互換性維持
+
+- 関数名、クラス名、公開インターフェースの変更は禁止（明示指示時のみ許可）。
+- 既存仕様・既存挙動は、要件で求められた箇所以外は維持すること。
+- 既存 API 仕様、レスポンス形式、例外意味、既存テスト意図を壊さないこと。
+
+## 11. コード品質要件
+
+- 出力コードは Python として構文的に有効であること。
+- 既存の文字コード・改行コード・ファイル末尾改行の方針を維持すること。
+- 出力に余計な文字列を含めないこと。
+
+## 12. Safe Failure Mode
+
+- 推測実装は禁止。
+- 出力の完全性を保証できない場合は、変更せず `TARGET_SOURCE_CODE` をそのまま返すこと。
+- 修正により構造が不安定になる場合は、変更せず `TARGET_SOURCE_CODE` をそのまま返すこと。
+- 修正対象が複数ファイルにまたがる場合は、変更せず `TARGET_SOURCE_CODE` をそのまま返すこと。
+- 要件が曖昧で安全に変更を確定できない場合は、変更せず `TARGET_SOURCE_CODE` をそのまま返すこと。
+- 説明文を返してはならない。
+
+## 13. 優先順位
+
+1. 出力の完全性と構造完全性を厳守すること
+2. 出力形式を厳守すること (修正後コード全文のみ)
+3. 出力対象ファイルを厳守すること (`TARGET_FILE_PATH` のみ)
+4. 既存仕様を壊さないこと
+5. 最小変更で要件を満たすこと
