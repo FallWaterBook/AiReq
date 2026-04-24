@@ -8,6 +8,7 @@ from jobs.views import (
     job_detail_view,
     job_push_view,
     job_test_view,
+    job_auto_fix_view,
     jobs_view,
 )
 
@@ -23,6 +24,8 @@ urlpatterns = [
     path("jobs/<int:job_id>/commit/", job_commit_view),
     path("jobs/<int:job_id>/push", job_push_view, name="job-push"),
     path("jobs/<int:job_id>/push/", job_push_view),
+    path("jobs/<int:job_id>/auto-fix", job_auto_fix_view, name="job-auto-fix"),
+    path("jobs/<int:job_id>/auto-fix/", job_auto_fix_view),
     path("git-diff", git_diff_view, name="git-diff"),
     path("git-diff/", git_diff_view),
     path("", RedirectView.as_view(url="/jobs", permanent=False)),

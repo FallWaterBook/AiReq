@@ -25,64 +25,14 @@ CODEX_TEMPLATE_PLACEHOLDERS = (
     "{{TO_BE_REQUIRED}}",
     "{{TO_BE_OPTIONAL}}",
     "{{WHY}}",
+    "{{TARGET_FILES_SOURCE_CODE}}",
 )
 
-
-def extract_unified_diff(text: str) -> str:
-    stripped = text.strip()
-    if not stripped:
-        return ""
-
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            body = "\n".join(lines[1:-1]).strip()
-            if body.lower().startswith("diff"):
-                body_lines = body.splitlines()
-                body = "\n".join(body_lines[1:]).strip() if len(body_lines) > 1 else ""
-            return body
-
-    return stripped
-
-
-def sanitize_ai_output(text: str) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = normalized.split("\n")
-    fence = "`" * 3
-
-    def is_leading_explanation(line: str) -> bool:
-        stripped = line.strip().lower()
-        if not stripped:
-            return True
-        prefixes = (
-            "here is",
-            "here's",
-            "here are",
-            "below is",
-            "the updated code",
-            "updated code:",
-            "sure,",
-            "sure.",
-            "certainly,",
-            "certainly.",
-            "of course",
-        )
-        return stripped.startswith(prefixes)
-
-    while lines and is_leading_explanation(lines[0]):
-        lines.pop(0)
-
-    if lines and lines[0].strip().startswith(fence):
-        lines = lines[1:]
-
-    if lines:
-        for idx in range(len(lines) - 1, -1, -1):
-            if lines[idx].strip().startswith(fence):
-                lines = lines[:idx]
-                break
-
-    lines = [line for line in lines if not line.strip().startswith(fence)]
-    return "\n".join(lines).strip()
+ALLOWED_AI_EDIT_FILES = (
+    "jobs/ai_target.py",
+    "jobs/views.py",
+    "templates/jobs/form.html",
+)
 
 
 def load_codex_rules() -> str:
@@ -115,18 +65,19 @@ def load_codex_task_template() -> str:
     return template_text
 
 
-def build_codex_prompt(user_prompt: str) -> str:
+def build_codex_prompt(user_prompt: str, target_files_source_code: str) -> str:
     try:
         template_text = load_codex_task_template()
 
         context = {
             "{{TARGET_APP}}": "AiReq",
-            "{{ALLOWED_FILES}}": "- jobs/ai_target.py",
+            "{{ALLOWED_FILES}}": "\n".join(f"- {path}" for path in ALLOWED_AI_EDIT_FILES),
             "{{FORBIDDEN_FILES}}": "- .venv/\n- db.sqlite3",
-            "{{AS_IS}}": "POST /jobs receives a user request and updates one target Python file.",
+            "{{AS_IS}}": "POST /jobs receives a user request and can update up to three related files.",
             "{{TO_BE_REQUIRED}}": user_prompt,
             "{{TO_BE_OPTIONAL}}": "- Keep existing logging and error string style ([error] ...).",
             "{{WHY}}": user_prompt,
+            "{{TARGET_FILES_SOURCE_CODE}}": target_files_source_code,
         }
 
         rendered = template_text
@@ -152,6 +103,169 @@ def read_target_source_code(target_file_path: Path) -> str:
         raise RuntimeError(f"failed to read target source code: {target_file_path}") from exc
 
 
+def build_target_files_source_code(file_paths: list[str]) -> str:
+    sections: list[str] = []
+    for file_path in file_paths[:3]:
+        abs_path = settings.BASE_DIR / file_path
+        try:
+            code = abs_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Failed to read target file source: %s", abs_path)
+            raise RuntimeError(f"failed to read target file source: {file_path}") from exc
+
+        language = "python" if file_path.endswith(".py") else "text"
+        sections.append(
+            "\n".join(
+                [
+                    f"## FILE: {file_path}",
+                    "",
+                    f"```{language}",
+                    code,
+                    "```",
+                ]
+            )
+        )
+
+    return "\n\n".join(sections)
+
+
+def parse_ai_files_output(output_text: str) -> list[dict]:
+    normalized = (output_text or "").strip()
+    if not normalized:
+        raise RuntimeError("OpenAI response was empty")
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    fence = "```"
+    if fence in normalized:
+        start = normalized.find(fence)
+        end = normalized.rfind(fence)
+        if end > start:
+            inner = normalized[start + len(fence):end]
+            if "\n" in inner:
+                first_line, rest = inner.split("\n", 1)
+                language = first_line.strip().lower()
+                if language in {"", "python", "py", "json"}:
+                    inner = rest
+            normalized = inner.strip()
+
+    try:
+        payload = json.loads(normalized)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid AI output JSON: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("AI output must be a JSON object")
+
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise RuntimeError("AI output files must be a list")
+    if len(files) > 3:
+        raise RuntimeError("AI output files exceeds max size: 3")
+
+    validated: list[dict] = []
+    for item in files:
+        if not isinstance(item, dict):
+            raise RuntimeError("each file entry must be an object")
+        if set(item.keys()) != {"path", "content"}:
+            raise RuntimeError("each file entry must contain only path and content")
+
+        path = item.get("path")
+        content = item.get("content")
+        if not isinstance(path, str) or not isinstance(content, str):
+            raise RuntimeError("path and content must be strings")
+
+        validated.append({"path": path, "content": content})
+
+    return validated
+
+
+def validate_ai_file_path(path: str) -> Path:
+    candidate = (path or "").strip()
+    if not candidate:
+        raise RuntimeError("path is required")
+
+    path_obj = Path(candidate)
+    if path_obj.is_absolute():
+        raise RuntimeError(f"absolute path is not allowed: {candidate}")
+    if ".." in path_obj.parts:
+        raise RuntimeError(f"parent path is not allowed: {candidate}")
+    if candidate not in ALLOWED_AI_EDIT_FILES:
+        raise RuntimeError(f"path is not allowed: {candidate}")
+
+    resolved = (settings.BASE_DIR / path_obj).resolve()
+    base_dir = settings.BASE_DIR.resolve()
+    if base_dir not in resolved.parents and resolved != base_dir:
+        raise RuntimeError(f"path must be under BASE_DIR: {candidate}")
+
+    return resolved
+
+
+def apply_ai_files(files: list[dict]) -> dict:
+    if not files:
+        return {"success": False, "error": "no files to apply", "applied_files": []}
+
+    original_sources: dict[Path, str] = {}
+    path_map: list[tuple[Path, str]] = []
+
+    try:
+        for item in files:
+            file_path = validate_ai_file_path(item["path"])
+            content = item["content"]
+            if not content or not content.strip():
+                raise RuntimeError(f"content is empty: {item['path']}")
+            if len(content.strip()) < 20:
+                raise RuntimeError(f"content too small: {item['path']}")
+            if len(content) > 20000:
+                raise RuntimeError(f"content too large: {item['path']}")
+
+            if file_path in original_sources:
+                raise RuntimeError(f"duplicate file path in output: {item['path']}")
+
+            original_sources[file_path] = file_path.read_text(encoding="utf-8")
+            if file_path.suffix == ".py":
+                try:
+                    compile(content, str(file_path), "exec")
+                except Exception as exc:
+                    raise RuntimeError(f"invalid python code for {item['path']}: {exc}") from exc
+
+            path_map.append((file_path, content))
+
+        for file_path, content in path_map:
+            file_path.write_text(content, encoding="utf-8")
+
+        for file_path, _ in path_map:
+            if file_path.suffix != ".py":
+                continue
+            compile_result = subprocess.run(
+                [sys.executable, "-m", "py_compile", str(file_path)],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+            if compile_result.returncode != 0:
+                message = (
+                    compile_result.stderr.strip()
+                    or compile_result.stdout.strip()
+                    or "py_compile failed"
+                )
+                raise RuntimeError(f"py_compile failed for {file_path}: {message}")
+
+        return {
+            "success": True,
+            "error": "",
+            "applied_files": [str(path.relative_to(settings.BASE_DIR)) for path, _ in path_map],
+        }
+    except Exception as exc:
+        logger.exception("Failed to apply AI files atomically")
+        for file_path, source in original_sources.items():
+            try:
+                file_path.write_text(source, encoding="utf-8")
+            except Exception:
+                logger.exception("Failed to rollback file: %s", file_path)
+
+        return {"success": False, "error": str(exc), "applied_files": []}
+
+
 def compress_rules(text: str) -> str:
     lines = []
     for line in text.splitlines():
@@ -171,24 +285,16 @@ def compress_rules(text: str) -> str:
 def build_ai_input(
     codex_rules_text: str,
     codex_task_prompt: str,
-    target_file_path: Path,
-    target_source_code: str,
+    target_files_source_code: str,
     optional_contexts: list[str] | None = None,
 ) -> str:
-    try:
-        rel_path = target_file_path.relative_to(settings.BASE_DIR)
-    except ValueError:
-        rel_path = target_file_path
     sections = [
         "You are a senior Python engineer.",
         "Follow CODEX_RULES strictly.",
-        "Return ONLY the full updated source code for TARGET_FILE_PATH.",
-        "Do not modify unrelated code.",
+        "Return ONLY valid JSON object output.",
         "Do not add explanations.",
+        "Do not output markdown.",
         "Do not output diff.",
-        "Do not change file structure.",
-        "Do not rename functions unless required.",
-        "Preserve existing behavior unless explicitly instructed.",
         "",
         "## CODEX_RULES",
         codex_rules_text,
@@ -196,11 +302,8 @@ def build_ai_input(
         "## CODEX_TASK",
         codex_task_prompt,
         "",
-        "## TARGET_FILE_PATH",
-        str(rel_path),
-        "",
-        "## TARGET_SOURCE_CODE",
-        target_source_code,
+        "## TARGET_FILES_SOURCE_CODE",
+        target_files_source_code,
     ]
 
     contexts = [c for c in (optional_contexts or []) if c and c.strip()]
@@ -210,7 +313,7 @@ def build_ai_input(
     return "\n".join(sections)
 
 
-def run_ai_openai(ai_input: str, target_file_path: Path) -> str:
+def run_ai_openai(ai_input: str) -> str:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
@@ -218,9 +321,7 @@ def run_ai_openai(ai_input: str, target_file_path: Path) -> str:
         logger.error("OPENAI_API_KEY is not set")
         return "[error] OPENAI_API_KEY is not set"
 
-    logger.info("OpenAI source generation start: file=%s model=%s", target_file_path, model)
-
-    backup_path = target_file_path.with_suffix(target_file_path.suffix + ".bak")
+    logger.info("OpenAI JSON generation start: model=%s", model)
 
     try:
         from openai import OpenAI
@@ -230,68 +331,72 @@ def run_ai_openai(ai_input: str, target_file_path: Path) -> str:
             model=model,
             input=ai_input,
         )
+
         output_text = getattr(response, "output_text", "") or ""
-        updated_source = sanitize_ai_output(output_text)
-        logger.info(
-            "AI output sanitized: raw_length=%s sanitized_length=%s",
-            len(output_text),
-            len(updated_source),
-        )
+        files = parse_ai_files_output(output_text)
+        apply_result = apply_ai_files(files)
+        if not apply_result.get("success"):
+            message = apply_result.get("error") or "failed to apply AI files"
+            logger.error("apply_ai_files failed: %s", message)
+            return f"[error] {message}"
 
-        stripped_source = updated_source.strip()
-        if not stripped_source:
-            reason = "empty after sanitize"
-            logger.error("AI output safety check failed: %s", reason)
-            return "[error] OpenAI response source was empty after sanitize"
-
-        if len(stripped_source) < 10:
-            reason = f"too short after sanitize: length={len(stripped_source)}"
-            logger.error("AI output safety check failed: %s", reason)
-            return "[error] OpenAI response source is too short after sanitize"
-        try:
-            compile(updated_source, str(target_file_path), "exec")
-        except Exception as e:
-            logger.error("AI output compile check failed: %s", str(e))
-            return f"[error] invalid python code: {e}"
-
-        original_source = target_file_path.read_text(encoding="utf-8")
-        backup_path.write_text(original_source, encoding="utf-8")
-
-        target_file_path.write_text(updated_source, encoding="utf-8")
-
-        compile_result = subprocess.run(
-            [sys.executable, "-m", "py_compile", str(target_file_path)],
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
-        if compile_result.returncode != 0:
-            target_file_path.write_text(original_source, encoding="utf-8")
-            message = (
-                compile_result.stderr.strip()
-                or compile_result.stdout.strip()
-                or "py_compile failed"
-            )
-            logger.error("py_compile failed and file restored: %s", message)
-            return f"[error] py_compile failed after overwrite: {message}"
-
-        logger.info("OpenAI source applied successfully: file=%s", target_file_path)
-        return updated_source
+        applied_files = apply_result.get("applied_files", [])
+        logger.info("OpenAI JSON applied successfully: files=%s", applied_files)
+        return "applied files: " + ", ".join(applied_files)
     except Exception as exc:
-        logger.exception("OpenAI source apply flow failed for file=%s", target_file_path)
-        if backup_path.exists():
-            try:
-                target_file_path.write_text(backup_path.read_text(encoding="utf-8"), encoding="utf-8")
-            except Exception:
-                logger.exception("Failed to restore file from backup after exception")
+        logger.exception("OpenAI JSON apply flow failed")
         return f"[error] OpenAI API call failed: {exc}"
-    finally:
-        if backup_path.exists():
-            try:
-                backup_path.unlink()
-            except Exception:
-                logger.warning("Failed to remove backup file: %s", backup_path)
+
+
+def run_ai_fix_loop(prompt: str, max_attempts: int = 3) -> dict:
+    attempts_limit = max(1, min(max_attempts, 3))
+    attempts: list[dict] = []
+    optional_contexts: list[str] = []
+
+    for attempt in range(1, attempts_limit + 1):
+        codex_rules_text = compress_rules(load_codex_rules())
+        target_files_source_code = build_target_files_source_code(list(ALLOWED_AI_EDIT_FILES))
+        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
+        ai_input = build_ai_input(
+            codex_rules_text=codex_rules_text,
+            codex_task_prompt=codex_task_prompt,
+            target_files_source_code=target_files_source_code,
+            optional_contexts=optional_contexts,
+        )
+        ai_result = run_ai_openai(ai_input)
+
+        attempt_result: dict = {
+            "attempt": attempt,
+            "ai_result": ai_result,
+        }
+        attempts.append(attempt_result)
+
+        if ai_result.startswith("[error]"):
+            break
+
+        test_result = run_tests()
+        attempt_result["test"] = test_result
+        if test_result.get("success"):
+            return {"success": True, "attempts": attempts}
+
+        optional_contexts.append(
+            "\n".join(
+                [
+                    "Previous attempt failed.",
+                    f"Command: {test_result.get('command', '')}",
+                    "",
+                    f"Return code: {test_result.get('returncode', '')}",
+                    "",
+                    f"STDOUT: {test_result.get('stdout', '')}",
+                    "",
+                    f"STDERR: {test_result.get('stderr', '')}",
+                    "",
+                    "Fix the failure while preserving the original user request.",
+                ]
+            )
+        )
+
+    return {"success": False, "attempts": attempts}
 
 
 def read_prompt(request: HttpRequest) -> str:
@@ -587,17 +692,15 @@ def jobs_view(request: HttpRequest):
 
     try:
         codex_rules_text = compress_rules(load_codex_rules())
-        codex_task_prompt = build_codex_prompt(prompt)
-        target_file_path = Path(TARGET_PYTHON_FILE)
-        target_source_code = read_target_source_code(target_file_path)
+        target_files_source_code = build_target_files_source_code(list(ALLOWED_AI_EDIT_FILES))
+        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
         ai_input = build_ai_input(
             codex_rules_text=codex_rules_text,
             codex_task_prompt=codex_task_prompt,
-            target_file_path=target_file_path,
-            target_source_code=target_source_code,
+            target_files_source_code=target_files_source_code,
             optional_contexts=[],
         )
-        result = run_ai_openai(ai_input, target_file_path)
+        result = run_ai_openai(ai_input)
     except Exception as exc:
         logger.exception("Failed before OpenAI execution")
         result = f"[error] Failed to build final codex prompt: {exc}"
@@ -736,6 +839,30 @@ def job_push_view(request: HttpRequest, job_id: int):
     push_result = git_push()
     status = 200 if push_result.get("success") else 400
     return JsonResponse({"job_id": job_id, "push": push_result}, status=status)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def job_auto_fix_view(request: HttpRequest, job_id: int):
+    job = get_object_or_404(Job, id=job_id)
+
+    job.status = Job.STATUS_RUNNING
+    job.save(update_fields=["status", "updated_at"])
+
+    loop_result = run_ai_fix_loop(job.prompt, max_attempts=3)
+    job.status = Job.STATUS_DONE
+    job.result = json.dumps(loop_result, ensure_ascii=False)
+    job.test_passed = bool(loop_result.get("success"))
+    job.save(update_fields=["status", "result", "test_passed", "updated_at"])
+
+    return JsonResponse(
+        {
+            "job_id": job_id,
+            "status": job.status,
+            "test_passed": job.test_passed,
+            "auto_fix": loop_result,
+        }
+    )
 
 
 @require_http_methods(["GET"])

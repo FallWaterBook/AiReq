@@ -262,7 +262,8 @@
   <label for="job-id">Job ID</label><br>
   <input id="job-id" type="number" value="{% if job %}{{ job.id }}{% endif %}" placeholder="job id"><br><br>
 
-  <button type="button" onclick="runTest()">test 実行</button><br><br>
+  <button type="button" onclick="runTest()">test 実行</button>
+  <button type="button" onclick="runAutoFix()">AI修正 + テスト自動ループ</button><br><br>
 
   <label for="commit-message">Commit Message</label><br>
   <input id="commit-message" type="text" size="60" placeholder="commit message"><br><br>
@@ -322,6 +323,10 @@
 
     function runTest() {
       postJobAction('test');
+    }
+
+    function runAutoFix() {
+      postJobAction('auto-fix');
     }
 
     function runCommit() {
