@@ -1,1 +1,337 @@
-...（form.html 全文を書き込み）...
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AiReq</title>
+  <style>
+    :root {
+      --bg-0: #d7d9dd;
+      --bg-1: #eef0f3;
+      --surface: #f7f8fa;
+      --surface-soft: #f1f3f6;
+      --line: #c5cad1;
+      --line-strong: #a4acb6;
+      --text: #22272f;
+      --text-soft: #4e5661;
+      --action: #2f363f;
+      --action-hover: #232a32;
+      --danger: #8e2d3b;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --shadow: 0 14px 36px rgba(38, 43, 51, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 28px 16px 40px;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+      line-height: 1.6;
+      background:
+        radial-gradient(900px 420px at 8% -10%, #ffffffc9 0%, transparent 68%),
+        radial-gradient(760px 460px at 106% 8%, #c2c7cf80 0%, transparent 72%),
+        linear-gradient(145deg, var(--bg-0) 0%, var(--bg-1) 52%, #d9dde2 100%);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      letter-spacing: 0.02em;
+      line-height: 1.35;
+      color: #1f252d;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0 auto 20px;
+      font-size: clamp(1.7rem, 2.4vw, 2.15rem);
+      font-weight: 700;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: clamp(1.1rem, 1.55vw, 1.3rem);
+      font-weight: 650;
+    }
+
+    h3 {
+      margin: 6px 0 10px;
+      font-size: 1rem;
+      font-weight: 620;
+      color: var(--text-soft);
+    }
+
+    form,
+    pre,
+    p,
+    label,
+    button,
+    input,
+    textarea,
+    hr,
+    h2,
+    h3 {
+      max-width: 920px;
+      margin-left: auto;
+      margin-right: auto;
+      display: block;
+    }
+
+    form,
+    pre[id="job-action-result"],
+    pre:not([id]),
+    p {
+      width: 100%;
+    }
+
+    form,
+    pre,
+    p {
+      background: linear-gradient(160deg, var(--surface) 0%, #eef1f4 100%);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 14px;
+      animation: appear 320ms ease-out both;
+    }
+
+    p {
+      margin-top: 0;
+    }
+
+    label {
+      margin-top: 12px;
+      margin-bottom: 6px;
+      font-size: 0.94rem;
+      font-weight: 620;
+      color: var(--text-soft);
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: var(--surface-soft);
+      color: var(--text);
+      padding: 11px 12px;
+      font: inherit;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+    }
+
+    textarea {
+      min-height: 132px;
+      resize: vertical;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: #7a8491;
+      box-shadow: 0 0 0 4px rgba(107, 117, 130, 0.2);
+      background: #fcfdff;
+    }
+
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: fit-content;
+      margin-left: auto;
+      margin-right: auto;
+      min-height: 42px;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #3d454f 0%, var(--action) 100%);
+      color: #f6f7f8;
+      font: inherit;
+      font-weight: 640;
+      cursor: pointer;
+      transition: transform 100ms ease, box-shadow 140ms ease, background 140ms ease;
+      box-shadow: 0 8px 16px rgba(35, 40, 47, 0.24);
+      margin-bottom: 10px;
+    }
+
+    button:hover {
+      background: linear-gradient(180deg, #333b45 0%, var(--action-hover) 100%);
+      box-shadow: 0 10px 18px rgba(29, 34, 41, 0.28);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    a {
+      color: #334250;
+      text-decoration-color: #7d8794;
+      text-underline-offset: 2px;
+      text-decoration-thickness: 1.5px;
+    }
+
+    a:hover {
+      color: #1f2b38;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "IBM Plex Mono", "Consolas", "Menlo", monospace;
+      font-size: 0.9rem;
+      line-height: 1.55;
+      background: linear-gradient(170deg, #eaedf1 0%, #e2e6eb 100%);
+      overflow: auto;
+    }
+
+    hr {
+      border: 0;
+      height: 1px;
+      margin: 20px auto;
+      background: linear-gradient(90deg, transparent 0%, #9098a580 18%, #9098a580 82%, transparent 100%);
+    }
+
+    p[style*="#b00020"] {
+      border-color: #c3818c;
+      background: linear-gradient(170deg, #f3e7e9 0%, #efd8dc 100%);
+      color: var(--danger);
+      font-weight: 600;
+    }
+
+    @keyframes appear {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 760px) {
+      body {
+        padding: 18px 12px 30px;
+      }
+
+      form,
+      pre,
+      p {
+        padding: 13px;
+        border-radius: 12px;
+      }
+
+      button {
+        width: 100%;
+        min-height: 44px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>AiReq（アイリク）</h1>
+
+  <h2>AI Job</h2>
+  <form method="post" action="/jobs">
+    {% csrf_token %}
+    <label for="prompt">Prompt</label><br>
+    <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea><br><br>
+    <button type="submit">送信</button>
+  </form>
+
+  {% if result is not None %}
+    <hr>
+    <h2>実行結果</h2>
+    {% if job %}
+      <p>Job ID: {{ job.id }}</p>
+      <p>Status: {{ job.status }}</p>
+      <p>Detail API: <a href="/jobs/{{ job.id }}">/jobs/{{ job.id }}</a></p>
+    {% endif %}
+    <p>{{ result }}</p>
+  {% endif %}
+
+  <hr>
+  <h2>Test / Commit / Push</h2>
+  <label for="job-id">Job ID</label><br>
+  <input id="job-id" type="number" value="{% if job %}{{ job.id }}{% endif %}" placeholder="job id"><br><br>
+
+  <button type="button" onclick="runTest()">test 実行</button><br><br>
+
+  <label for="commit-message">Commit Message</label><br>
+  <input id="commit-message" type="text" size="60" placeholder="commit message"><br><br>
+  <button type="button" onclick="runCommit()">commit</button>
+  <button type="button" onclick="runPush()">push</button>
+
+  <h3>操作結果</h3>
+  <pre id="job-action-result" style="white-space: pre-wrap; word-break: break-word;"></pre>
+
+  <hr>
+  <h2>Git Diff</h2>
+  <form method="post" action="/git-diff">
+    {% csrf_token %}
+    <label for="directory">Directory</label><br>
+    <input id="directory" name="directory" type="text" value="{{ git_directory }}" size="60" placeholder="例: . または /path/to/repo"><br><br>
+    <button type="submit">差分を取得</button>
+  </form>
+
+  {% if git_error %}
+    <p style="color: #b00020;">Error: {{ git_error }}</p>
+  {% endif %}
+
+  {% if git_diff is not None %}
+    <h3>Diff Result</h3>
+    {% if git_diff %}
+      <pre style="white-space: pre-wrap; word-break: break-word;">{{ git_diff }}</pre>
+    {% else %}
+      <p>差分はありません。</p>
+    {% endif %}
+  {% endif %}
+
+  <script>
+    async function postJobAction(action, payload) {
+      const jobId = document.getElementById('job-id').value;
+      const out = document.getElementById('job-action-result');
+      if (!jobId) {
+        out.textContent = 'job id is required';
+        return;
+      }
+
+      const body = payload ? JSON.stringify(payload) : '{}';
+      try {
+        const res = await fetch(`/jobs/${jobId}/${action}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body,
+        });
+        const data = await res.json();
+        out.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        out.textContent = `request failed: ${e}`;
+      }
+    }
+
+    function runTest() {
+      postJobAction('test');
+    }
+
+    function runCommit() {
+      const commitMessage = document.getElementById('commit-message').value;
+      postJobAction('commit', { commit_message: commitMessage });
+    }
+
+    function runPush() {
+      postJobAction('push');
+    }
+  </script>
+</body>
+</html>

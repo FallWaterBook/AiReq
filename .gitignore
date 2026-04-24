@@ -1,1 +1,23 @@
-...（.gitignore 内容）...
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv
+venv/
+.venv/
+
+# Django / local
+db.sqlite3
+*.sqlite3
+.env
+.env.*
+!.env.example
+media/
+logs/
+tmp/
+staticfiles/
+
+# OS
+.DS_Store
