@@ -68,6 +68,7 @@ def load_codex_task_template() -> str:
 def build_codex_prompt(user_prompt: str, target_files_source_code: str) -> str:
     try:
         template_text = load_codex_task_template()
+        source_code_placeholder = "{{TARGET_FILES_SOURCE_CODE}}"
 
         context = {
             "{{TARGET_APP}}": "AiReq",
@@ -77,17 +78,22 @@ def build_codex_prompt(user_prompt: str, target_files_source_code: str) -> str:
             "{{TO_BE_REQUIRED}}": user_prompt,
             "{{TO_BE_OPTIONAL}}": "- Keep existing logging and error string style ([error] ...).",
             "{{WHY}}": user_prompt,
-            "{{TARGET_FILES_SOURCE_CODE}}": target_files_source_code,
         }
 
         rendered = template_text
         for key, value in context.items():
             rendered = rendered.replace(key, value)
 
-        unresolved = [token for token in CODEX_TEMPLATE_PLACEHOLDERS if token in rendered]
+        unresolved_check_targets = tuple(
+            token for token in CODEX_TEMPLATE_PLACEHOLDERS
+            if token != source_code_placeholder
+        )
+        unresolved = [token for token in unresolved_check_targets if token in rendered]
         if unresolved:
             logger.error("Unresolved template placeholders: %s", unresolved)
             raise RuntimeError(f"unresolved placeholders: {', '.join(unresolved)}")
+
+        rendered = rendered.replace(source_code_placeholder, target_files_source_code)
 
         return rendered
     except Exception:
@@ -106,7 +112,7 @@ def read_target_source_code(target_file_path: Path) -> str:
 def build_target_files_source_code(file_paths: list[str]) -> str:
     sections: list[str] = []
     for file_path in file_paths[:3]:
-        abs_path = settings.BASE_DIR / file_path
+        abs_path = Path(settings.TARGET_REPO_DIR) / file_path
         try:
             code = abs_path.read_text(encoding="utf-8")
         except Exception as exc:
@@ -191,8 +197,8 @@ def validate_ai_file_path(path: str) -> Path:
     if candidate not in ALLOWED_AI_EDIT_FILES:
         raise RuntimeError(f"path is not allowed: {candidate}")
 
-    resolved = (settings.BASE_DIR / path_obj).resolve()
-    base_dir = settings.BASE_DIR.resolve()
+    resolved = (Path(settings.TARGET_REPO_DIR) / path_obj).resolve()
+    base_dir = Path(settings.TARGET_REPO_DIR).resolve()
     if base_dir not in resolved.parents and resolved != base_dir:
         raise RuntimeError(f"path must be under BASE_DIR: {candidate}")
 
@@ -253,7 +259,9 @@ def apply_ai_files(files: list[dict]) -> dict:
         return {
             "success": True,
             "error": "",
-            "applied_files": [str(path.relative_to(settings.BASE_DIR)) for path, _ in path_map],
+            "applied_files": [
+                str(path.relative_to(Path(settings.TARGET_REPO_DIR))) for path, _ in path_map
+            ],
         }
     except Exception as exc:
         logger.exception("Failed to apply AI files atomically")
@@ -434,13 +442,14 @@ def resolve_target_directory(raw_directory: str) -> Path:
     return (settings.BASE_DIR / raw_path).resolve()
 
 
-def run_git_diff(raw_directory: str) -> tuple[dict | None, str | None]:
-    target_dir = resolve_target_directory(raw_directory)
+def run_git_diff() -> tuple[dict | None, str | None]:
+    target_dir = Path(settings.TARGET_REPO_DIR).expanduser().resolve()
     if not target_dir.exists() or not target_dir.is_dir():
-        return None, f"directory not found: {target_dir}"
+        return None, f"directory not found: {settings.TARGET_REPO_DIR}"
 
     completed = subprocess.run(
-        ["git", "-C", str(target_dir), "diff", "--no-color"],
+        ["git", "diff", "--no-color"],
+        cwd=str(target_dir),
         capture_output=True,
         text=True,
         check=False,
@@ -448,8 +457,7 @@ def run_git_diff(raw_directory: str) -> tuple[dict | None, str | None]:
     )
 
     if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or "git diff failed"
-        return None, message
+        return None, completed.stderr.strip() or "git diff failed"
 
     diff_text = completed.stdout
     return {
@@ -465,7 +473,7 @@ def run_tests() -> dict:
     try:
         completed = subprocess.run(
             command_parts,
-            cwd=str(settings.BASE_DIR),
+            cwd=str(Path(settings.TARGET_REPO_DIR)),
             capture_output=True,
             text=True,
             check=False,
@@ -492,7 +500,7 @@ def run_tests() -> dict:
 def get_git_diff_stat() -> dict:
     try:
         completed = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "diff", "--stat"],
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "diff", "--stat"],
             capture_output=True,
             text=True,
             check=False,
@@ -549,7 +557,7 @@ def git_commit(commit_message: str) -> dict:
 
     try:
         add_result = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "add", "-A"],
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "add", "-A"],
             capture_output=True,
             text=True,
             check=False,
@@ -565,7 +573,7 @@ def git_commit(commit_message: str) -> dict:
             }
 
         commit_result = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "commit", "-m", message],
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "commit", "-m", message],
             capture_output=True,
             text=True,
             check=False,
@@ -592,7 +600,7 @@ def git_commit(commit_message: str) -> dict:
 def get_current_branch() -> str:
     try:
         completed = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
             check=False,
@@ -629,7 +637,7 @@ def git_push() -> dict:
 
     try:
         completed = subprocess.run(
-            ["git", "-C", str(settings.BASE_DIR), "push"],
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "push"],
             capture_output=True,
             text=True,
             check=False,
@@ -741,13 +749,7 @@ def jobs_view(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(["POST"])
 def git_diff_view(request: HttpRequest):
-    directory = read_directory(request)
-    if not directory:
-        if is_json_request(request):
-            return JsonResponse({"error": "directory is required"}, status=400)
-        return HttpResponseBadRequest("directory is required")
-
-    result, error = run_git_diff(directory)
+    result, error = run_git_diff()
 
     if is_json_request(request):
         if error:
@@ -762,7 +764,7 @@ def git_diff_view(request: HttpRequest):
                 "prompt": "",
                 "result": None,
                 "job": None,
-                "git_directory": directory,
+                "git_directory": settings.TARGET_REPO_DIR,
                 "git_diff": None,
                 "git_error": error,
             },
