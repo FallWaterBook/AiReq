@@ -323,10 +323,7 @@
       <p class="section-note">Commit/Push 前に差分を確認してください。</p>
       <form method="post" action="/git-diff">
         {% csrf_token %}
-        <div class="field">
-          <label for="directory">Directory</label>
-          <input id="directory" name="directory" type="text" value="{{ git_directory }}" size="60" placeholder="例: . または /path/to/repo">
-        </div>
+        <p class="hint">対象リポジトリの差分を確認します。</p>
         <div class="actions">
           <button type="submit">Git Diff確認</button>
         </div>

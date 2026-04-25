@@ -117,15 +117,12 @@ def build_target_files_source_code(file_paths: list[str]) -> str:
             logger.exception("Failed to read target file source: %s", abs_path)
             raise RuntimeError(f"failed to read target file source: {file_path}") from exc
 
-        language = "python" if file_path.endswith(".py") else "text"
         sections.append(
             "\n".join(
                 [
                     f"## FILE: {file_path}",
                     "",
-                    f"```{language}",
                     code,
-                    "```",
                 ]
             )
         )
@@ -555,7 +552,7 @@ def run_git_diff() -> tuple[dict | None, str | None]:
     return {
         "directory": str(target_dir),
         "diff": diff_text,
-        "is_clean": diff_text == "",
+        "is_clean": not diff_text.strip(),
     }, None
 
 

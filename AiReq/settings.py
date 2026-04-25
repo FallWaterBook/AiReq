@@ -72,7 +72,7 @@ CODEX_TASK_TEMPLATE_PATH = os.getenv(
     str(BASE_DIR / "docs" / "CODEX_TASK_TEMPLATE.md"),
 )
 
-TARGET_REPO_DIR = r"C:\work\AiReq"
+TARGET_REPO_DIR = r"/home/centos/work/AiReq"
 
 LOGGING = {
     "version": 1,

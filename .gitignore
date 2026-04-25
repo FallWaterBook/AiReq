@@ -21,3 +21,4 @@ staticfiles/
 
 # OS
 .DS_Store
+.codex
