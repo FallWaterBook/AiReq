@@ -28,12 +28,6 @@ CODEX_TEMPLATE_PLACEHOLDERS = (
     "{{TARGET_FILES_SOURCE_CODE}}",
 )
 
-ALLOWED_AI_EDIT_FILES = (
-    "jobs/ai_target.py",
-    "jobs/views.py",
-    "templates/jobs/form.html",
-)
-
 
 def load_codex_rules() -> str:
     rules_path = Path(settings.CODEX_RULES_PATH)
@@ -65,14 +59,18 @@ def load_codex_task_template() -> str:
     return template_text
 
 
-def build_codex_prompt(user_prompt: str, target_files_source_code: str) -> str:
+def build_codex_prompt(
+    user_prompt: str,
+    target_files_source_code: str,
+    allowed_files: list[str],
+) -> str:
     try:
         template_text = load_codex_task_template()
         source_code_placeholder = "{{TARGET_FILES_SOURCE_CODE}}"
 
         context = {
             "{{TARGET_APP}}": "AiReq",
-            "{{ALLOWED_FILES}}": "\n".join(f"- {path}" for path in ALLOWED_AI_EDIT_FILES),
+            "{{ALLOWED_FILES}}": "\n".join(f"- {path}" for path in allowed_files),
             "{{FORBIDDEN_FILES}}": "- .venv/\n- db.sqlite3",
             "{{AS_IS}}": "POST /jobs receives a user request and can update up to three related files.",
             "{{TO_BE_REQUIRED}}": user_prompt,
@@ -184,7 +182,7 @@ def parse_ai_files_output(output_text: str) -> list[dict]:
     return validated
 
 
-def validate_ai_file_path(path: str) -> Path:
+def validate_ai_file_path(path: str, allowed_files: list[str]) -> Path:
     candidate = (path or "").strip()
     if not candidate:
         raise RuntimeError("path is required")
@@ -194,7 +192,7 @@ def validate_ai_file_path(path: str) -> Path:
         raise RuntimeError(f"absolute path is not allowed: {candidate}")
     if ".." in path_obj.parts:
         raise RuntimeError(f"parent path is not allowed: {candidate}")
-    if candidate not in ALLOWED_AI_EDIT_FILES:
+    if candidate not in allowed_files:
         raise RuntimeError(f"path is not allowed: {candidate}")
 
     resolved = (Path(settings.TARGET_REPO_DIR) / path_obj).resolve()
@@ -205,7 +203,7 @@ def validate_ai_file_path(path: str) -> Path:
     return resolved
 
 
-def apply_ai_files(files: list[dict]) -> dict:
+def apply_ai_files(files: list[dict], allowed_files: list[str]) -> dict:
     if not files:
         return {"success": False, "error": "no files to apply", "applied_files": []}
 
@@ -214,7 +212,7 @@ def apply_ai_files(files: list[dict]) -> dict:
 
     try:
         for item in files:
-            file_path = validate_ai_file_path(item["path"])
+            file_path = validate_ai_file_path(item["path"], allowed_files)
             content = item["content"]
             if not content or not content.strip():
                 raise RuntimeError(f"content is empty: {item['path']}")
@@ -321,7 +319,7 @@ def build_ai_input(
     return "\n".join(sections)
 
 
-def run_ai_openai(ai_input: str) -> str:
+def run_ai_openai(ai_input: str, allowed_files: list[str]) -> str:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
@@ -342,7 +340,7 @@ def run_ai_openai(ai_input: str) -> str:
 
         output_text = getattr(response, "output_text", "") or ""
         files = parse_ai_files_output(output_text)
-        apply_result = apply_ai_files(files)
+        apply_result = apply_ai_files(files, allowed_files)
         if not apply_result.get("success"):
             message = apply_result.get("error") or "failed to apply AI files"
             logger.error("apply_ai_files failed: %s", message)
@@ -356,22 +354,22 @@ def run_ai_openai(ai_input: str) -> str:
         return f"[error] OpenAI API call failed: {exc}"
 
 
-def run_ai_fix_loop(prompt: str, max_attempts: int = 3) -> dict:
+def run_ai_fix_loop(prompt: str, allowed_files: list[str], max_attempts: int = 3) -> dict:
     attempts_limit = max(1, min(max_attempts, 3))
     attempts: list[dict] = []
     optional_contexts: list[str] = []
 
     for attempt in range(1, attempts_limit + 1):
         codex_rules_text = compress_rules(load_codex_rules())
-        target_files_source_code = build_target_files_source_code(list(ALLOWED_AI_EDIT_FILES))
-        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
+        target_files_source_code = build_target_files_source_code(allowed_files)
+        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code, allowed_files)
         ai_input = build_ai_input(
             codex_rules_text=codex_rules_text,
             codex_task_prompt=codex_task_prompt,
             target_files_source_code=target_files_source_code,
             optional_contexts=optional_contexts,
         )
-        ai_result = run_ai_openai(ai_input)
+        ai_result = run_ai_openai(ai_input, allowed_files)
 
         attempt_result: dict = {
             "attempt": attempt,
@@ -416,6 +414,100 @@ def read_prompt(request: HttpRequest) -> str:
             return ""
         return (body.get("prompt") or "").strip()
     return (request.POST.get("prompt") or "").strip()
+
+
+def read_target_files(request: HttpRequest) -> list[str]:
+    raw_target_files: str | list[str] | None
+    if request.content_type and "application/json" in request.content_type:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body = {}
+        raw_target_files = body.get("target_files")
+    else:
+        raw_target_files = request.POST.get("target_files")
+
+    values: list[str]
+    if isinstance(raw_target_files, list):
+        values = [str(v).strip() for v in raw_target_files]
+    else:
+        text_value = (raw_target_files or "").strip()
+        values = [line.strip() for line in text_value.splitlines()]
+
+    normalized = [v for v in values if v]
+    if not normalized:
+        raise RuntimeError("target_files is required")
+    if len(normalized) > 3:
+        raise RuntimeError("target_files exceeds max size: 3")
+
+    return normalized
+
+
+def validate_requested_target_files(file_paths: list[str]) -> list[str]:
+    if not file_paths:
+        raise RuntimeError("target_files is required")
+    if len(file_paths) > 3:
+        raise RuntimeError("target_files exceeds max size: 3")
+
+    base_dir = Path(settings.TARGET_REPO_DIR).resolve()
+    normalized_paths: list[str] = []
+    seen: set[str] = set()
+
+    for raw_path in file_paths:
+        candidate = (raw_path or "").strip()
+        if not candidate:
+            continue
+
+        path_obj = Path(candidate)
+        if path_obj.is_absolute():
+            raise RuntimeError(f"absolute path is not allowed: {candidate}")
+        if ".." in path_obj.parts:
+            raise RuntimeError(f"parent path is not allowed: {candidate}")
+
+        resolved = (base_dir / path_obj).resolve()
+        if base_dir not in resolved.parents and resolved != base_dir:
+            raise RuntimeError(f"path must be under BASE_DIR: {candidate}")
+        if not resolved.exists() or not resolved.is_file():
+            raise RuntimeError(f"file not found: {candidate}")
+
+        normalized = str(resolved.relative_to(base_dir)).replace("\\", "/")
+        if normalized in seen:
+            raise RuntimeError(f"duplicate path is not allowed: {normalized}")
+        seen.add(normalized)
+        normalized_paths.append(normalized)
+
+    if not normalized_paths:
+        raise RuntimeError("target_files is required")
+
+    return normalized_paths
+
+
+def build_job_prompt_with_target_files(user_prompt: str, allowed_files: list[str]) -> str:
+    lines = ["Target files:", ""]
+    lines.extend(f"- {path}" for path in allowed_files)
+    lines.extend(["", "User request:", user_prompt])
+    return "\n".join(lines)
+
+
+def extract_target_files_from_job_prompt(prompt: str) -> tuple[list[str], str]:
+    text = (prompt or "").strip()
+    header = "Target files:"
+    separator = "\n\nUser request:\n"
+    if text.startswith(header) and separator in text:
+        file_block, user_request = text.split(separator, 1)
+        files: list[str] = []
+        for line in file_block.splitlines()[1:]:
+            value = line.strip()
+            if value.startswith("- "):
+                value = value[2:].strip()
+            if value:
+                files.append(value)
+        return files, user_request.strip()
+    return [], text
+
+
+def target_files_to_multiline_text(file_paths: list[str]) -> str:
+    return "\n".join(file_paths)
 
 
 def read_directory(request: HttpRequest) -> str:
@@ -673,13 +765,21 @@ def parse_json_body(request: HttpRequest) -> dict:
 @require_http_methods(["GET", "POST"])
 def jobs_view(request: HttpRequest):
     if request.method == "GET":
+        latest_job = Job.objects.order_by("-id").first()
+        latest_target_files: list[str] = []
+        latest_user_request = ""
+        if latest_job:
+            latest_target_files, latest_user_request = extract_target_files_from_job_prompt(
+                latest_job.prompt
+            )
         return render(
             request,
             "jobs/form.html",
             {
-                "prompt": "",
-                "result": None,
-                "job": None,
+                "prompt": latest_user_request,
+                "target_files": target_files_to_multiline_text(latest_target_files),
+                "result": latest_job.result if latest_job else None,
+                "job": latest_job,
                 "git_directory": "",
                 "git_diff": None,
                 "git_error": None,
@@ -691,9 +791,18 @@ def jobs_view(request: HttpRequest):
         if is_json_request(request):
             return JsonResponse({"error": "prompt is required"}, status=400)
         return HttpResponseBadRequest("prompt is required")
+    try:
+        requested_files = read_target_files(request)
+        allowed_files = validate_requested_target_files(requested_files)
+    except RuntimeError as exc:
+        if is_json_request(request):
+            return JsonResponse({"error": str(exc)}, status=400)
+        return HttpResponseBadRequest(str(exc))
 
-    job = Job.objects.create(prompt=prompt, status=Job.STATUS_QUEUED)
-    logger.info("Job queued: id=%s prompt=%s", job.id, prompt)
+    stored_prompt = build_job_prompt_with_target_files(prompt, allowed_files)
+
+    job = Job.objects.create(prompt=stored_prompt, status=Job.STATUS_QUEUED)
+    logger.info("Job queued: id=%s prompt=%s", job.id, stored_prompt)
 
     job.status = Job.STATUS_RUNNING
     job.save(update_fields=["status", "updated_at"])
@@ -701,15 +810,15 @@ def jobs_view(request: HttpRequest):
 
     try:
         codex_rules_text = compress_rules(load_codex_rules())
-        target_files_source_code = build_target_files_source_code(list(ALLOWED_AI_EDIT_FILES))
-        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
+        target_files_source_code = build_target_files_source_code(allowed_files)
+        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code, allowed_files)
         ai_input = build_ai_input(
             codex_rules_text=codex_rules_text,
             codex_task_prompt=codex_task_prompt,
             target_files_source_code=target_files_source_code,
             optional_contexts=[],
         )
-        result = run_ai_openai(ai_input)
+        result = run_ai_openai(ai_input, allowed_files)
     except Exception as exc:
         logger.exception("Failed before OpenAI execution")
         result = f"[error] Failed to build final codex prompt: {exc}"
@@ -736,6 +845,7 @@ def jobs_view(request: HttpRequest):
         "jobs/form.html",
         {
             "prompt": prompt,
+            "target_files": target_files_to_multiline_text(allowed_files),
             "result": job.result,
             "job": job,
             "git_directory": "",
@@ -750,6 +860,13 @@ def jobs_view(request: HttpRequest):
 @require_http_methods(["POST"])
 def git_diff_view(request: HttpRequest):
     result, error = run_git_diff()
+    latest_job = Job.objects.order_by("-id").first()
+    latest_target_files: list[str] = []
+    latest_user_request = ""
+    if latest_job:
+        latest_target_files, latest_user_request = extract_target_files_from_job_prompt(
+            latest_job.prompt
+        )
 
     if is_json_request(request):
         if error:
@@ -761,9 +878,10 @@ def git_diff_view(request: HttpRequest):
             request,
             "jobs/form.html",
             {
-                "prompt": "",
-                "result": None,
-                "job": None,
+                "prompt": latest_user_request,
+                "target_files": target_files_to_multiline_text(latest_target_files),
+                "result": latest_job.result if latest_job else None,
+                "job": latest_job,
                 "git_directory": settings.TARGET_REPO_DIR,
                 "git_diff": None,
                 "git_error": error,
@@ -775,9 +893,10 @@ def git_diff_view(request: HttpRequest):
         request,
         "jobs/form.html",
         {
-            "prompt": "",
-            "result": None,
-            "job": None,
+            "prompt": latest_user_request,
+            "target_files": target_files_to_multiline_text(latest_target_files),
+            "result": latest_job.result if latest_job else None,
+            "job": latest_job,
             "git_directory": result["directory"],
             "git_diff": result["diff"],
             "git_error": None,
@@ -852,7 +971,13 @@ def job_auto_fix_view(request: HttpRequest, job_id: int):
     job.status = Job.STATUS_RUNNING
     job.save(update_fields=["status", "updated_at"])
 
-    loop_result = run_ai_fix_loop(job.prompt, max_attempts=3)
+    try:
+        requested_files, user_request = extract_target_files_from_job_prompt(job.prompt)
+        allowed_files = validate_requested_target_files(requested_files)
+        loop_result = run_ai_fix_loop(user_request, allowed_files, max_attempts=3)
+    except Exception as exc:
+        logger.exception("Failed to run auto-fix loop")
+        loop_result = {"success": False, "attempts": [], "error": str(exc)}
     job.status = Job.STATUS_DONE
     job.result = json.dumps(loop_result, ensure_ascii=False)
     job.test_passed = bool(loop_result.get("success"))

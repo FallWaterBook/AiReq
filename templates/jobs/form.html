@@ -279,6 +279,16 @@
           <label for="prompt">Prompt</label>
           <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea>
         </div>
+        <div class="field">
+          <label for="target-files">対象ファイル（1行1ファイル / 最大3件）</label>
+          <textarea
+            id="target-files"
+            name="target_files"
+            rows="4"
+            cols="40"
+            placeholder="apps/trainings/services.py&#10;apps/trainings/views.py&#10;templates/trainings/form.html"
+          >{{ target_files }}</textarea>
+        </div>
         <div class="actions">
           <button type="submit">AI修正を実行</button>
         </div>
@@ -290,8 +300,13 @@
       <p class="section-note">最新Job IDを使って、修正とテストを実行します。</p>
       <div class="field">
         <label for="job-id">Job ID</label>
-        <p class="hint">現在の操作対象: Job {{ job.id }}</p>
-        <input id="job-id" type="number" value="{{ job.id }}" readonly>
+        {% if job %}
+          <p class="hint">現在の操作対象: Job {{ job.id }}</p>
+          <input id="job-id" type="number" value="{{ job.id }}" readonly>
+        {% else %}
+          <p class="hint">まだJobがありません。先にPromptを送信してください。</p>
+          <input id="job-id" type="number" value="" readonly>
+        {% endif %}
       </div>
       <div class="actions">
         <button type="button" onclick="runAutoFix()">AI修正→テスト自動ループ</button>
