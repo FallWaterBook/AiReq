@@ -279,16 +279,6 @@
           <label for="prompt">Prompt</label>
           <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea>
         </div>
-        <div class="field">
-          <label for="target-files">対象ファイル（1行1ファイル / 最大3件）</label>
-          <textarea
-            id="target-files"
-            name="target_files"
-            rows="4"
-            cols="40"
-            placeholder="apps/trainings/services.py&#10;apps/trainings/views.py&#10;templates/trainings/form.html"
-          >{{ target_files }}</textarea>
-        </div>
         <div class="actions">
           <button type="submit">AI修正を実行</button>
         </div>
@@ -332,8 +322,12 @@
         <p class="error-box">Error: {{ git_error }}</p>
       {% endif %}
       {% if git_diff is not None %}
-        <h3>Diff Result</h3>
-        {% if git_diff %}
+        {% if git_diff or git_diff_stat or git_changed_files %}
+          <h3>Changed Files</h3>
+          <pre>{{ git_changed_files }}</pre>
+          <h3>Diff Stat</h3>
+          <pre>{{ git_diff_stat }}</pre>
+          <h3>Raw Diff</h3>
           <pre>{{ git_diff }}</pre>
         {% else %}
           <p class="section-note">差分はありません。</p>
