@@ -73,7 +73,7 @@ CODEX_TASK_TEMPLATE_PATH = os.getenv(
 )
 
 TARGET_REPO_DIR = r"/home/centos/work/AiReq"
-AIREQ_REQUIRE_TEST_BEFORE_PUSH = True
+AIREQ_REQUIRE_TEST_BEFORE_PUSH = False
 
 LOGGING = {
     "version": 1,

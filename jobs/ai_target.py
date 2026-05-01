@@ -1,2 +1,2 @@
 def sample_function() -> str:
-    return "edit"
+    return "edit me!"
