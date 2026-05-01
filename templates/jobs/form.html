@@ -304,8 +304,6 @@
       <div class="actions">
         <button type="button" onclick="runTest()">テストのみ実行</button>
       </div>
-      <h3>操作ログ（履歴）</h3>
-      <pre id="job-action-result"></pre>
     </section>
 
     <section class="section">
@@ -361,6 +359,11 @@
         <pre>{{ result }}</pre>
       </section>
     {% endif %}
+
+    <section class="section result-block">
+      <h3>操作ログ（履歴）</h3>
+      <pre id="job-action-result"></pre>
+    </section>
   </div>
 
   <script>
