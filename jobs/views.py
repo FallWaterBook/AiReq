@@ -733,7 +733,7 @@ def get_current_branch() -> str:
 def git_push() -> dict:
     branch = get_current_branch()
     is_protect_branch_push = getattr(settings, "PROTECTED_BRANCHES_PUSH", True)
-    protect＿branch = getattr(settings, "PROTECTED_BRANCHES", {"main", "master", "develop"})
+    protect_branch = getattr(settings, "PROTECTED_BRANCHES", {"main", "master", "develop"})
 
     if not branch:
         return {
@@ -744,7 +744,7 @@ def git_push() -> dict:
             "branch": "",
         }
 
-    if is_protect_branch_push in True and branch in protect＿branch:
+    if is_protect_branch_push and branch in protect_branch:
         return {
             "success": False,
             "stdout": "",
