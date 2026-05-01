@@ -730,32 +730,71 @@ def get_current_branch() -> str:
         return ""
 
 
+def get_git_upstream_status() -> dict:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        upstream_stdout = (completed.stdout or "").strip()
+        return {
+            "has_upstream": completed.returncode == 0 and bool(upstream_stdout),
+            "stdout": upstream_stdout,
+            "stderr": completed.stderr,
+            "returncode": completed.returncode,
+        }
+    except Exception as exc:
+        logger.exception("Failed to get upstream status")
+        return {
+            "has_upstream": False,
+            "stdout": "",
+            "stderr": str(exc),
+            "returncode": -1,
+        }
+
+
 def git_push() -> dict:
     branch = get_current_branch()
-    is_protect_branch_push = getattr(settings, "PROTECTED_BRANCHES_PUSH", True)
-    protect_branch = getattr(settings, "PROTECTED_BRANCHES", {"main", "master", "develop"})
+    protected_branches = set(getattr(settings, "PROTECTED_BRANCHES", {"main", "master", "develop"}))
+    protected_push_enabled = bool(getattr(settings, "PROTECTED_BRANCHES_PUSH", False))
 
     if not branch:
         return {
             "success": False,
             "stdout": "",
-            "stderr": "failed to detect current branch",
+            "stderr": "failed to detect current branch (git rev-parse failed)",
             "returncode": 1,
             "branch": "",
+            "has_upstream": False,
+            "command": "",
         }
 
-    if is_protect_branch_push and branch in protect_branch:
+    if branch in protected_branches and not protected_push_enabled:
         return {
             "success": False,
             "stdout": "",
             "stderr": f"push to protected branch is blocked: {branch}",
             "returncode": 1,
             "branch": branch,
+            "has_upstream": False,
+            "command": "",
         }
+
+    upstream_status = get_git_upstream_status()
+    has_upstream = bool(upstream_status.get("has_upstream"))
+
+    command = ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "push"]
+    command_text = "git push"
+    if not has_upstream:
+        command = ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "push", "-u", "origin", branch]
+        command_text = f"git push -u origin {branch}"
 
     try:
         completed = subprocess.run(
-            ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "push"],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -767,6 +806,8 @@ def git_push() -> dict:
             "stderr": completed.stderr,
             "returncode": completed.returncode,
             "branch": branch,
+            "has_upstream": has_upstream,
+            "command": command_text,
         }
     except Exception as exc:
         logger.exception("git_push failed")
@@ -776,6 +817,8 @@ def git_push() -> dict:
             "stderr": str(exc),
             "returncode": -1,
             "branch": branch,
+            "has_upstream": has_upstream,
+            "command": command_text,
         }
 
 
