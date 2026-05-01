@@ -6,6 +6,7 @@
 ## 0. Global Rules
 
 - `CODEX_RULES.md` を最優先で遵守すること。
+- `CODEX_MIND.md` を元に思考すること。
 - 推測で実装しないこと。
 - 変更は最小限に限定すること。
 
@@ -15,11 +16,9 @@
 
 ## 2. Editable Scope
 
-### ALLOWED_FILES
-{{ALLOWED_FILES}}
-
-### FORBIDDEN_FILES
-{{FORBIDDEN_FILES}}
+- You may edit any file under TARGET_REPO_DIR
+- Do not edit system directories (.git, .venv, venv, node_modules, __pycache__)
+- Follow the user instruction for target files
 
 ## 3. Current State (AS-IS)
 
@@ -72,8 +71,8 @@
 
 ## 12. Size Safety Rule
 
-- 各 `content` は極端に短い場合は禁止。
-- `content` が 10 文字未満の場合は `{"files": []}` を返すこと。
+- 各 `content` は明らかに不正な短さの場合は禁止する。
+- 例: 1〜2文字だけの `content` は異常とみなし、`{"files": []}` を返すこと。
 
 ## 13. Output Restrictions
 
@@ -88,5 +87,4 @@
 
 - 不明点があり安全に修正できない場合は `{"files": []}` を返すこと。
 - 3ファイル以内に収まらない場合は `{"files": []}` を返すこと。
-- `ALLOWED_FILES` 外の変更が必要な場合は `{"files": []}` を返すこと。
 - 説明文は返してはならない。
