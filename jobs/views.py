@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from django.conf import settings
-from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -1178,3 +1178,14 @@ def job_detail_view(request: HttpRequest, job_id: int):
             "updated_at": job.updated_at.isoformat(),
         }
     )
+
+
+@require_http_methods(["GET"])
+def mobile_task_template_view(request: HttpRequest):
+    template_path = Path(settings.BASE_DIR) / "docs" / "MOBILE_TASK_TEMPLATE.md"
+    try:
+        content = template_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.exception("Failed to read MOBILE_TASK_TEMPLATE.md: %s", template_path)
+        return JsonResponse({"error": str(exc)}, status=500)
+    return HttpResponse(content, content_type="text/plain; charset=utf-8")

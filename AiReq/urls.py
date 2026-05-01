@@ -10,6 +10,7 @@ from jobs.views import (
     job_test_view,
     job_auto_fix_view,
     jobs_view,
+    mobile_task_template_view,
 )
 
 urlpatterns = [
@@ -28,5 +29,7 @@ urlpatterns = [
     path("jobs/<int:job_id>/auto-fix/", job_auto_fix_view),
     path("git-diff", git_diff_view, name="git-diff"),
     path("git-diff/", git_diff_view),
+    path("mobile-task-template", mobile_task_template_view, name="mobile-task-template"),
+    path("mobile-task-template/", mobile_task_template_view),
     path("", RedirectView.as_view(url="/jobs", permanent=False)),
 ]

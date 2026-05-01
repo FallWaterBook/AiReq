@@ -301,6 +301,9 @@
         <div class="actions">
           <button type="submit">AI修正を実行</button>
         </div>
+        <div class="actions">
+          <button type="button" onclick="copyMobileTaskTemplate()">モバイル用テンプレコピー</button>
+        </div>
       </form>
     </section>
 
@@ -401,6 +404,27 @@
   </div>
 
   <script>
+    async function copyMobileTaskTemplate() {
+      const out = document.getElementById('job-action-result');
+      try {
+        const res = await fetch('/mobile-task-template', {
+          method: 'GET',
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        await navigator.clipboard.writeText(text);
+        const textarea = document.getElementById('prompt');
+        if (textarea) {
+          textarea.value = text;
+        }
+        out.textContent = 'モバイル用テンプレートをコピーし、入力欄に反映しました。\n' + out.textContent;
+      } catch (e) {
+        out.textContent = `テンプレートコピー失敗: ${e}\n` + out.textContent;
+      }
+    }
+
     function clearDisplayMessages() {
       const successBox = document.getElementById('global-success-message');
       if (successBox) {
