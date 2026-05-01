@@ -231,6 +231,16 @@
       font-weight: 600;
     }
 
+    .success-box {
+      margin: 0;
+      padding: 10px 12px;
+      border: 1px solid #84b79a;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(170deg, #e5f2ea 0%, #d5eadf 100%);
+      color: #1f5e3a;
+      font-weight: 600;
+    }
+
     @keyframes appear {
       from {
         opacity: 0;
@@ -268,6 +278,15 @@
 
     {% if job %}
       <p class="result-meta">最新Job: <strong>{{ job.id }}</strong> / Status: <strong>{{ job.status }}</strong> / Detail API: <a href="/jobs/{{ job.id }}">/jobs/{{ job.id }}</a></p>
+    {% endif %}
+    {% if current_branch %}
+      <p class="result-meta">Current Branch: <strong>{{ current_branch }}</strong></p>
+    {% endif %}
+    {% if success_message %}
+      <p id="global-success-message" class="success-box">{{ success_message }}</p>
+    {% endif %}
+    {% if error_message %}
+      <p id="global-error-message" class="error-box">Error: {{ error_message }}</p>
     {% endif %}
 
     <section class="section">
@@ -316,9 +335,6 @@
           <button type="submit">Git Diff確認</button>
         </div>
       </form>
-      {% if git_error %}
-        <p class="error-box">Error: {{ git_error }}</p>
-      {% endif %}
       {% if git_diff is not None %}
         {% if git_diff or git_diff_stat or git_changed_files %}
           <h3>Changed Files</h3>
@@ -334,7 +350,25 @@
     </section>
 
     <section class="section">
-      <h2>4. Commit</h2>
+      <h2>4. ブランチ作成・切替</h2>
+      <p class="hint">main への push を避けるため、作業用ブランチを作成して切り替えます。</p>
+      <form method="post" action="/jobs">
+        {% csrf_token %}
+        <div class="field">
+          <label for="branch-name">Branch Name</label>
+          <input id="branch-name" name="branch_name" type="text" placeholder="feature/your-task">
+        </div>
+        <div class="actions">
+          <button type="submit" name="action" value="switch_branch">既存ブランチへ切替</button>
+        </div>
+        <div class="actions">
+          <button type="submit" name="action" value="create_branch">新規ブランチ作成・切替</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="section">
+      <h2>5. Commit</h2>
       <p class="hint">差分確認後に Commit してください。</p>
       <div class="field">
         <label for="commit-message">Commit Message</label>
@@ -346,17 +380,17 @@
     </section>
 
     <section class="section">
-      <h2>5. Push</h2>
+      <h2>6. Push</h2>
       <p class="hint">Push前に必ずGit Diffとテスト結果を確認してください。</p>
       <div class="actions">
         <button type="button" class="danger-button" onclick="runPush()">Push</button>
       </div>
     </section>
 
-    {% if result is not None %}
-      <section class="section result-block">
+    {% if result %}
+      <section id="server-result-section" class="section result-block">
         <h2>実行結果</h2>
-        <pre>{{ result }}</pre>
+        <pre id="server-result">{{ result }}</pre>
       </section>
     {% endif %}
 
@@ -367,9 +401,31 @@
   </div>
 
   <script>
+    function clearDisplayMessages() {
+      const successBox = document.getElementById('global-success-message');
+      if (successBox) {
+        successBox.textContent = '';
+        successBox.style.display = 'none';
+      }
+      const errorBox = document.getElementById('global-error-message');
+      if (errorBox) {
+        errorBox.textContent = '';
+        errorBox.style.display = 'none';
+      }
+      const serverResult = document.getElementById('server-result');
+      if (serverResult) {
+        serverResult.textContent = '';
+        const resultSection = serverResult.closest('section.result-block');
+        if (resultSection) {
+          resultSection.style.display = 'none';
+        }
+      }
+    }
+
     async function postJobAction(action, payload) {
       const jobId = document.getElementById('job-id').value;
       const out = document.getElementById('job-action-result');
+      clearDisplayMessages();
       if (!jobId) {
         out.textContent = 'job id is required';
         return;

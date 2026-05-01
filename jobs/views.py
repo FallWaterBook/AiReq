@@ -15,7 +15,7 @@ from django.views.decorators.http import require_http_methods
 from .models import Job
 
 logger = logging.getLogger("jobs")
-PROTECTED_BRANCHES = {"main", "master", "develop"}
+
 TEST_COMMAND = getattr(settings, "AIREQ_TEST_COMMAND", [sys.executable, "manage.py", "check"])
 CODEX_TEMPLATE_PLACEHOLDERS = (
     "{{TARGET_APP}}",
@@ -732,6 +732,9 @@ def get_current_branch() -> str:
 
 def git_push() -> dict:
     branch = get_current_branch()
+    is_protect_branch_push = getattr(settings, "PROTECTED_BRANCHES_PUSH", True)
+    protect＿branch = getattr(settings, "PROTECTED_BRANCHES", {"main", "master", "develop"})
+
     if not branch:
         return {
             "success": False,
@@ -741,7 +744,7 @@ def git_push() -> dict:
             "branch": "",
         }
 
-    if branch in PROTECTED_BRANCHES:
+    if is_protect_branch_push in True and branch in protect＿branch:
         return {
             "success": False,
             "stdout": "",
@@ -776,6 +779,78 @@ def git_push() -> dict:
         }
 
 
+def validate_branch_name(branch_name: str) -> str | None:
+    name = (branch_name or "").strip()
+    if not name:
+        return "invalid branch_name: empty"
+    if name.startswith("/"):
+        return "invalid branch_name: must not start with '/'"
+    if name.startswith("-"):
+        return "invalid branch_name: must not start with '-'"
+    if ".." in name:
+        return "invalid branch_name: must not contain '..'"
+    if "\\" in name:
+        return "invalid branch_name: must not contain '\\'"
+    if name.endswith("/"):
+        return "invalid branch_name: must not end with '/'"
+    if name.endswith(".lock"):
+        return "invalid branch_name: must not end with '.lock'"
+    return None
+
+
+def git_checkout_branch(branch_name: str, create: bool = False) -> dict:
+    name = (branch_name or "").strip()
+    validation_error = validate_branch_name(name)
+    if validation_error:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": validation_error,
+            "returncode": 1,
+            "branch": "",
+        }
+    try:
+        command = ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "switch"]
+        if create:
+            command.append("-c")
+        command.append(name)
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if (
+            create
+            and completed.returncode != 0
+            and "already exists" in (completed.stderr or "").lower()
+        ):
+            completed = subprocess.run(
+                ["git", "-C", str(Path(settings.TARGET_REPO_DIR)), "switch", name],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        return {
+            "success": completed.returncode == 0,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "returncode": completed.returncode,
+            "branch": name,
+        }
+    except Exception as exc:
+        logger.exception("git_checkout_branch failed")
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": str(exc),
+            "returncode": -1,
+            "branch": name,
+        }
+
+
 def parse_json_body(request: HttpRequest) -> dict:
     try:
         return json.loads(request.body.decode("utf-8")) if request.body else {}
@@ -800,8 +875,52 @@ def jobs_view(request: HttpRequest):
                 "git_diff": None,
                 "git_diff_stat": "",
                 "git_changed_files": "",
-                "git_error": None,
+                "error_message": None,
+                "success_message": None,
+                "current_branch": get_current_branch(),
             },
+        )
+
+    action = (request.POST.get("action") or "").strip()
+    if action in {"switch_branch", "create_branch"}:
+        latest_job = Job.objects.order_by("-id").first()
+        latest_user_prompt = latest_job.prompt if latest_job else ""
+        branch_name = (request.POST.get("branch_name") or "").strip()
+        is_create = action == "create_branch"
+        checkout_result = git_checkout_branch(branch_name, create=is_create)
+        success = checkout_result.get("success")
+        error_message = None if success else (checkout_result.get("stderr") or "git switch failed")
+        success_message = (
+            (
+                f"新規ブランチを作成して切り替えました: {branch_name}"
+                if is_create
+                else f"既存ブランチへ切り替えました: {branch_name}"
+            )
+            if success
+            else None
+        )
+        result_text = (
+            checkout_result.get("stdout")
+            or checkout_result.get("stderr")
+            or ""
+        )
+        status = 200 if success else 400
+        return render(
+            request,
+            "jobs/form.html",
+            {
+                "prompt": latest_user_prompt,
+                "result": result_text,
+                "job": latest_job,
+                "git_directory": "",
+                "git_diff": None,
+                "git_diff_stat": "",
+                "git_changed_files": "",
+                "error_message": error_message,
+                "success_message": success_message,
+                "current_branch": get_current_branch(),
+            },
+            status=status,
         )
 
     prompt = read_prompt(request)
@@ -862,7 +981,9 @@ def jobs_view(request: HttpRequest):
             "git_diff": None,
             "git_diff_stat": "",
             "git_changed_files": "",
-            "git_error": None,
+            "error_message": None,
+            "success_message": None,
+            "current_branch": get_current_branch(),
         },
     )
 
@@ -871,28 +992,30 @@ def jobs_view(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(["POST"])
 def git_diff_view(request: HttpRequest):
-    result, error = run_git_diff()
+    diff_result, diff_error = run_git_diff()
     latest_job = Job.objects.order_by("-id").first()
     latest_user_prompt = latest_job.prompt if latest_job else ""
 
     if is_json_request(request):
-        if error:
-            return JsonResponse({"error": error}, status=400)
-        return JsonResponse(result)
+        if diff_error:
+            return JsonResponse({"error": diff_error}, status=400)
+        return JsonResponse(diff_result)
 
-    if error:
+    if diff_error:
         return render(
             request,
             "jobs/form.html",
             {
                 "prompt": latest_user_prompt,
-                "result": latest_job.result if latest_job else None,
+                "result": None,
                 "job": latest_job,
                 "git_directory": settings.TARGET_REPO_DIR,
                 "git_diff": None,
                 "git_diff_stat": "",
                 "git_changed_files": "",
-                "git_error": error,
+                "error_message": diff_error,
+                "success_message": None,
+                "current_branch": get_current_branch(),
             },
             status=400,
         )
@@ -902,13 +1025,15 @@ def git_diff_view(request: HttpRequest):
         "jobs/form.html",
         {
             "prompt": latest_user_prompt,
-            "result": latest_job.result if latest_job else None,
+            "result": None,
             "job": latest_job,
-            "git_directory": result["directory"],
-            "git_diff": result["diff"],
-            "git_diff_stat": result["stat"],
-            "git_changed_files": result["changed_files"],
-            "git_error": None,
+            "git_directory": diff_result["directory"],
+            "git_diff": diff_result["diff"],
+            "git_diff_stat": diff_result["stat"],
+            "git_changed_files": diff_result["changed_files"],
+            "error_message": None,
+            "success_message": "Git Diffを取得しました",
+            "current_branch": get_current_branch(),
         },
     )
 
