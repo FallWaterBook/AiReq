@@ -772,7 +772,7 @@ def git_push() -> dict:
             "command": "",
         }
 
-    if branch in protected_branches and not protected_push_enabled:
+    if branch in protected_branches and protected_push_enabled:
         return {
             "success": False,
             "stdout": "",
