@@ -111,6 +111,7 @@
     }
 
     input,
+    select,
     textarea {
       width: 100%;
       border: 1px solid var(--line-strong);
@@ -129,6 +130,7 @@
     }
 
     input:focus,
+    select:focus,
     textarea:focus {
       border-color: #7a8491;
       box-shadow: 0 0 0 4px rgba(107, 117, 130, 0.2);
@@ -294,6 +296,13 @@
       <p class="section-note">まずAI修正を開始します。</p>
       <form method="post" action="/jobs">
         {% csrf_token %}
+        <div class="field">
+          <label for="engine">実行方式</label>
+          <select id="engine" name="engine">
+            <option value="openai_api" {% if engine != "codex_cli" %}selected{% endif %}>OpenAI API</option>
+            <option value="codex_cli" {% if engine == "codex_cli" %}selected{% endif %}>Codex CLI</option>
+          </select>
+        </div>
         <div class="field">
           <label for="prompt">Prompt</label>
           <textarea id="prompt" name="prompt" rows="6" cols="40">{{ prompt }}</textarea>

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -527,6 +528,16 @@ def read_prompt(request: HttpRequest) -> str:
     return (request.POST.get("prompt") or "").strip()
 
 
+def read_engine(request: HttpRequest) -> str:
+    if request.content_type and "application/json" in request.content_type:
+        try:
+            body = json.loads(request.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return "openai_api"
+        return (body.get("engine") or "openai_api").strip()
+    return (request.POST.get("engine") or "openai_api").strip()
+
+
 def is_json_request(request: HttpRequest) -> bool:
     accept = request.headers.get("Accept", "")
     return "application/json" in accept or (
@@ -606,6 +617,95 @@ def run_tests() -> dict:
         return {
             "success": False,
             "command": command_str,
+            "stdout": "",
+            "stderr": str(exc),
+            "returncode": -1,
+        }
+
+
+def load_codex_cli_project_rules() -> str:
+    target_dir = Path(settings.TARGET_REPO_DIR).resolve()
+    candidates = getattr(
+        settings,
+        "AIREQ_CODEX_PROJECT_MD_CANDIDATES",
+        ["CODEX.md", "CODEX_RULES.md", "CODEX_CLI_TASK_TEMPLATE.md"],
+    )
+    for candidate in candidates:
+        relative = Path(str(candidate))
+        if relative.is_absolute():
+            continue
+        path = (target_dir / relative).resolve()
+        if target_dir not in path.parents and path != target_dir:
+            continue
+        if path.exists() and path.is_file():
+            text = path.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+
+    fallback = Path(settings.BASE_DIR) / "docs" / "CODEX_CLI_TASK_TEMPLATE.md"
+    text = fallback.read_text(encoding="utf-8").strip()
+    if not text:
+        raise RuntimeError("fallback codex cli template is empty")
+    return text
+
+
+def build_codex_cli_prompt(user_prompt: str) -> str:
+    project_rules = load_codex_cli_project_rules()
+    return "\n\n".join(
+        [
+            "## Project Rules",
+            project_rules,
+            "## User Request",
+            user_prompt,
+            "## Execution Policy",
+            "\n".join(
+                [
+                    "- Do not commit.",
+                    "- Do not push.",
+                    "- Run tests after changes.",
+                    "- If tests fail, fix and rerun tests.",
+                    "- Leave changes in working tree for human review.",
+                ]
+            ),
+        ]
+    )
+
+
+def run_ai_codex_cli(prompt: str) -> dict:
+    command = shlex.split(str(getattr(settings, "AIREQ_CODEX_CLI_COMMAND", "codex")))
+    command.extend(
+        [
+            "exec",
+            "--sandbox",
+            str(getattr(settings, "AIREQ_CODEX_CLI_SANDBOX", "workspace-write")),
+        ]
+    )
+    approval = str(getattr(settings, "AIREQ_CODEX_CLI_APPROVAL", "")).strip()
+    if approval:
+        command.extend(["--ask-for-approval", approval])
+    command.append(prompt)
+    timeout = int(getattr(settings, "AIREQ_CODEX_CLI_TIMEOUT", 900))
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(Path(settings.TARGET_REPO_DIR).resolve()),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        return {
+            "success": completed.returncode == 0,
+            "command": command,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "returncode": completed.returncode,
+        }
+    except Exception as exc:
+        logger.exception("Codex CLI execution failed")
+        return {
+            "success": False,
+            "command": command,
             "stdout": "",
             "stderr": str(exc),
             "returncode": -1,
@@ -907,11 +1007,13 @@ def parse_json_body(request: HttpRequest) -> dict:
 def jobs_view(request: HttpRequest):
     if request.method == "GET":
         latest_job = Job.objects.order_by("-id").first()
+        default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
         return render(
             request,
             "jobs/form.html",
             {
                 "prompt": latest_job.prompt if latest_job else "",
+                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
                 "result": latest_job.result if latest_job else None,
                 "job": latest_job,
                 "git_directory": "",
@@ -928,6 +1030,7 @@ def jobs_view(request: HttpRequest):
     if action in {"switch_branch", "create_branch"}:
         latest_job = Job.objects.order_by("-id").first()
         latest_user_prompt = latest_job.prompt if latest_job else ""
+        default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
         branch_name = (request.POST.get("branch_name") or "").strip()
         is_create = action == "create_branch"
         checkout_result = git_checkout_branch(branch_name, create=is_create)
@@ -953,6 +1056,7 @@ def jobs_view(request: HttpRequest):
             "jobs/form.html",
             {
                 "prompt": latest_user_prompt,
+                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
                 "result": result_text,
                 "job": latest_job,
                 "git_directory": "",
@@ -967,6 +1071,9 @@ def jobs_view(request: HttpRequest):
         )
 
     prompt = read_prompt(request)
+    engine = read_engine(request)
+    if engine not in {"openai_api", "codex_cli"}:
+        engine = "openai_api"
     if not prompt:
         if is_json_request(request):
             return JsonResponse({"error": "prompt is required"}, status=400)
@@ -979,23 +1086,51 @@ def jobs_view(request: HttpRequest):
     logger.info("Job running: id=%s", job.id)
 
     try:
-        codex_rules_text = compress_rules(load_codex_rules())
-        target_files_source_code = build_auto_target_files_source_code(prompt)
-        target_files_source_code = (
-            target_files_source_code.strip()
-            or "## NOTE\nNo existing source files provided. Create new files as needed."
-        )
-        codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
-        ai_input = build_ai_input(
-            codex_rules_text=codex_rules_text,
-            codex_task_prompt=codex_task_prompt,
-            target_files_source_code=target_files_source_code,
-            optional_contexts=[],
-        )
-        result = run_ai_openai(ai_input)
+        if engine == "codex_cli":
+            codex_prompt = build_codex_cli_prompt(prompt)
+            codex_result = run_ai_codex_cli(codex_prompt)
+            test_result = run_tests()
+            job.test_passed = bool(test_result.get("success"))
+            safe_command = codex_result.get("command", [])[:-1]
+            result = "\n".join(
+                [
+                    f"engine: codex_cli",
+                    f"success: {codex_result.get('success')}",
+                    f"test_success: {job.test_passed}",
+                    f"returncode: {codex_result.get('returncode')}",
+                    f"command: {shlex.join(safe_command)}",
+                    "",
+                    "stdout:",
+                    codex_result.get("stdout") or "",
+                    "",
+                    "stderr:",
+                    codex_result.get("stderr") or "",
+                    "",
+                    "test_stdout:",
+                    test_result.get("stdout") or "",
+                    "",
+                    "test_stderr:",
+                    test_result.get("stderr") or "",
+                ]
+            )
+        else:
+            codex_rules_text = compress_rules(load_codex_rules())
+            target_files_source_code = build_auto_target_files_source_code(prompt)
+            target_files_source_code = (
+                target_files_source_code.strip()
+                or "## NOTE\nNo existing source files provided. Create new files as needed."
+            )
+            codex_task_prompt = build_codex_prompt(prompt, target_files_source_code)
+            ai_input = build_ai_input(
+                codex_rules_text=codex_rules_text,
+                codex_task_prompt=codex_task_prompt,
+                target_files_source_code=target_files_source_code,
+                optional_contexts=[],
+            )
+            result = run_ai_openai(ai_input)
     except Exception as exc:
-        logger.exception("Failed before OpenAI execution")
-        result = f"[error] Failed to build final codex prompt: {exc}"
+        logger.exception("Failed before AI execution: engine=%s", engine)
+        result = f"[error] Failed before AI execution ({engine}): {exc}"
 
     job.status = Job.STATUS_DONE
     job.result = result
@@ -1018,6 +1153,7 @@ def jobs_view(request: HttpRequest):
         "jobs/form.html",
         {
             "prompt": prompt,
+            "engine": engine,
             "result": job.result,
             "job": job,
             "git_directory": "",
@@ -1038,6 +1174,7 @@ def git_diff_view(request: HttpRequest):
     diff_result, diff_error = run_git_diff()
     latest_job = Job.objects.order_by("-id").first()
     latest_user_prompt = latest_job.prompt if latest_job else ""
+    default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
 
     if is_json_request(request):
         if diff_error:
@@ -1050,6 +1187,7 @@ def git_diff_view(request: HttpRequest):
             "jobs/form.html",
             {
                 "prompt": latest_user_prompt,
+                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
                 "result": None,
                 "job": latest_job,
                 "git_directory": settings.TARGET_REPO_DIR,
@@ -1068,6 +1206,7 @@ def git_diff_view(request: HttpRequest):
         "jobs/form.html",
         {
             "prompt": latest_user_prompt,
+            "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
             "result": None,
             "job": latest_job,
             "git_directory": diff_result["directory"],
