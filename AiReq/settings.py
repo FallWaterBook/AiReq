@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = "dev-only-change-me"
 DEBUG = True
@@ -72,8 +74,7 @@ CODEX_TASK_TEMPLATE_PATH = os.getenv(
     str(BASE_DIR / "docs" / "CODEX_TASK_TEMPLATE.md"),
 )
 
-TARGET_REPO_DIR = r"/home/centos/work/AiReq"
-AIREQ_AI_ENGINE = os.getenv("AIREQ_AI_ENGINE", "openai_api")
+TARGET_REPO_DIR = os.getenv("TARGET_REPO_DIR", r"/home/centos/work/AiReq")
 AIREQ_CODEX_CLI_COMMAND = os.getenv("AIREQ_CODEX_CLI_COMMAND", "codex")
 AIREQ_CODEX_CLI_TIMEOUT = int(os.getenv("AIREQ_CODEX_CLI_TIMEOUT", "900"))
 AIREQ_CODEX_CLI_SANDBOX = os.getenv("AIREQ_CODEX_CLI_SANDBOX", "workspace-write")

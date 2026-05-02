@@ -413,6 +413,25 @@
   </div>
 
   <script>
+    const ENGINE_STORAGE_KEY = 'aireq.selectedEngine';
+    const allowedEngines = ['openai_api', 'codex_cli'];
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const engineSelect = document.getElementById('engine');
+      if (!engineSelect) return;
+
+      const savedEngine = localStorage.getItem(ENGINE_STORAGE_KEY);
+      if (allowedEngines.includes(savedEngine)) {
+        engineSelect.value = savedEngine;
+      }
+
+      engineSelect.addEventListener('change', () => {
+        if (allowedEngines.includes(engineSelect.value)) {
+          localStorage.setItem(ENGINE_STORAGE_KEY, engineSelect.value);
+        }
+      });
+    });
+
     async function copyMobileTaskTemplate() {
       const out = document.getElementById('job-action-result');
       try {

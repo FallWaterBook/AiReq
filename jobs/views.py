@@ -680,9 +680,6 @@ def run_ai_codex_cli(prompt: str) -> dict:
             str(getattr(settings, "AIREQ_CODEX_CLI_SANDBOX", "workspace-write")),
         ]
     )
-    approval = str(getattr(settings, "AIREQ_CODEX_CLI_APPROVAL", "")).strip()
-    if approval:
-        command.extend(["--ask-for-approval", approval])
     command.append(prompt)
     timeout = int(getattr(settings, "AIREQ_CODEX_CLI_TIMEOUT", 900))
     try:
@@ -1007,13 +1004,12 @@ def parse_json_body(request: HttpRequest) -> dict:
 def jobs_view(request: HttpRequest):
     if request.method == "GET":
         latest_job = Job.objects.order_by("-id").first()
-        default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
         return render(
             request,
             "jobs/form.html",
             {
                 "prompt": latest_job.prompt if latest_job else "",
-                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
+                "engine": "openai_api",
                 "result": latest_job.result if latest_job else None,
                 "job": latest_job,
                 "git_directory": "",
@@ -1030,7 +1026,6 @@ def jobs_view(request: HttpRequest):
     if action in {"switch_branch", "create_branch"}:
         latest_job = Job.objects.order_by("-id").first()
         latest_user_prompt = latest_job.prompt if latest_job else ""
-        default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
         branch_name = (request.POST.get("branch_name") or "").strip()
         is_create = action == "create_branch"
         checkout_result = git_checkout_branch(branch_name, create=is_create)
@@ -1056,7 +1051,7 @@ def jobs_view(request: HttpRequest):
             "jobs/form.html",
             {
                 "prompt": latest_user_prompt,
-                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
+                "engine": read_engine(request) if request.method == "POST" else "codex_cli",
                 "result": result_text,
                 "job": latest_job,
                 "git_directory": "",
@@ -1174,7 +1169,6 @@ def git_diff_view(request: HttpRequest):
     diff_result, diff_error = run_git_diff()
     latest_job = Job.objects.order_by("-id").first()
     latest_user_prompt = latest_job.prompt if latest_job else ""
-    default_engine = getattr(settings, "AIREQ_AI_ENGINE", "openai_api")
 
     if is_json_request(request):
         if diff_error:
@@ -1187,7 +1181,7 @@ def git_diff_view(request: HttpRequest):
             "jobs/form.html",
             {
                 "prompt": latest_user_prompt,
-                "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
+                "engine": "openai_api",
                 "result": None,
                 "job": latest_job,
                 "git_directory": settings.TARGET_REPO_DIR,
@@ -1206,7 +1200,7 @@ def git_diff_view(request: HttpRequest):
         "jobs/form.html",
         {
             "prompt": latest_user_prompt,
-            "engine": default_engine if default_engine in {"openai_api", "codex_cli"} else "openai_api",
+            "engine": "openai_api",
             "result": None,
             "job": latest_job,
             "git_directory": diff_result["directory"],
